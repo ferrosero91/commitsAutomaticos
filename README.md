@@ -16,6 +16,8 @@ colaboradores y subiéndolos a un remoto.
 - Python **3.9** o superior.
 - Git **2.25** o superior en el `PATH`.
 - Sin dependencias de runtime: solo biblioteca estándar.
+- `tkinter` solo para la interfaz gráfica (incluido en el instalador oficial de
+  Python en macOS/Windows; en Linux: `sudo apt install python3-tk`).
 
 ## Instalación
 
@@ -57,6 +59,34 @@ El flujo es:
 Cada colaborador necesita un **token de acceso personal (PAT)** de GitHub.
 Si no existe uno guardado, se solicita una sola vez con `getpass` (no se
 muestra en pantalla) y se almacena de forma segura.
+
+## Interfaz gráfica
+
+```bash
+autocommit --gui
+# o, tras la instalación:
+autocommit-gui
+```
+
+La ventana tiene cuatro pestañas:
+
+- **Proyecto:** carpeta, URL del remoto y rama.
+- **Colaboradores:** tabla con nombre, usuario, email, commits y estado del
+  token. Añadir/editar/quitar con un diálogo; el token se escribe enmascarado y
+  se puede guardar en el almacén seguro (`0600`).
+- **Opciones:** límites de archivos, pushes, espera, reanudar, continuar ante
+  errores, simulación y mensajes con IA (modelo, URL y clave).
+- **Registro:** salida en vivo, progreso y resultado.
+
+Botones **Previsualizar** (simulación, no toca el repositorio), **Ejecutar** y
+**Detener** (termina el paso actual y deja el estado para reanudar). La GUI usa
+el mismo motor que la CLI y comparte tokens, archivo `.env` y configuración de
+IA.
+
+Se eligió Tkinter por ser parte de la biblioteca estándar y no añadir un runtime
+extra; Flet queda como alternativa si más adelante se prioriza una estética
+web. La lógica de validación está separada en `gui_state.py` para poder probarla
+sin abrir ventanas.
 
 ## Uso no interactivo
 
@@ -131,6 +161,7 @@ Ejemplo: `Ada Lovelace:ada-lovelace:ada@example.com:12`.
 | `--ai-timeout SEGUNDOS` | Timeout por llamada. | `30` |
 | `--ai-max-calls N` | Mensajes por IA; después, heurística. | `200` |
 | `--env-file RUTA` | Carga variables `CLAVE=VALOR` antes de ejecutar. | — |
+| `--gui` | Abre la interfaz gráfica en lugar de la consola. | Desactivado |
 | `--dry-run` | Mostrar el plan sin modificar el repositorio. | Desactivado |
 | `--resume` | Continuar desde `.git/autocommit/state.json`. | Desactivado |
 | `--keep-going` | Seguir si un commit falla. | Desactivado |
@@ -355,6 +386,8 @@ autocommit/
 ├── messages.py        # mensajes Conventional Commits
 ├── ai.py              # mensajes con IA (OpenCode V2)
 ├── env.py             # carga explícita de archivos .env
+├── gui.py             # ventana tkinter/ttk
+├── gui_state.py       # validación y preparación sin Tk
 ├── files.py           # descubrimiento + filtrado .gitignore
 ├── security.py        # escaneo de secretos y redacción
 ├── git_repository.py  # único adaptador del binario git
@@ -389,8 +422,9 @@ make lint        # ruff check . && ruff format --check .
 
 La suite usa `unittest` (sin dependencias) y cubre modelos, planificador,
 mensajes, descubrimiento de archivos, seguridad, credenciales, estado,
-repositorio Git real (incluido push a un remoto local) y la aplicación completa
-en modo simulación y real.
+repositorio Git real (incluido push a un remoto local), la aplicación completa
+en modo simulación y real, cancelación entre commits, variables `.env` y la
+lógica de la interfaz gráfica (sin abrir ventanas).
 
 ## Migración desde la versión anterior
 
@@ -416,6 +450,8 @@ python3 -m autocommit --delay 30 --push-every 1
 ## Limitaciones conocidas
 
 - Añade commits a la rama actual; no reescribe historia ni crea pull requests.
+- La interfaz gráfica no pide tokens por consola: hay que escribirlos, tenerlos
+  en `AUTOCOMMIT_TOKEN_*` o guardados en el almacén.
 - Los mensajes son heurísticos y no interpretan el contenido del diff.
 - El escaneo de secretos es heurístico y solo lee los primeros 512 KB de cada
   archivo.
