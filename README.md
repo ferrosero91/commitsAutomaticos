@@ -126,6 +126,8 @@ Ejemplo: `Ada Lovelace:ada-lovelace:ada@example.com:12`.
 | `--ai-model MODELO` | Modelo de OpenCode. | `deepseek-v4.1-flash` |
 | `--ai-base-url URL` | Base OpenAI-compatible (Go o pay-as-you-go). | Go V2 |
 | `--ai-api-key-env VAR` | Variable con la clave. | `OPENCODE_API_KEY` |
+| `--ai-api-key CLAVE` | Clave directa (queda en el historial). | — |
+| `--ai-api-key-file RUTA` | Archivo con la clave. | `~/.config/autocommit/opencode_key` |
 | `--ai-timeout SEGUNDOS` | Timeout por llamada. | `30` |
 | `--ai-max-calls N` | Mensajes por IA; después, heurística. | `200` |
 | `--dry-run` | Mostrar el plan sin modificar el repositorio. | Desactivado |
@@ -227,8 +229,31 @@ export AUTOCOMMIT_AI_BASE_URL="https://opencode.ai/inference/go/openai/v1"
 export AUTOCOMMIT_AI_BASE_URL="https://opencode.ai/inference/openai/v1"
 ```
 
-La clave se lee de `OPENCODE_API_KEY` (o de la variable indicada con
-`--ai-api-key-env`). Se envía como `Authorization: Bearer ...`, junto con
+### Cómo proporcionar la clave
+
+Orden de resolución:
+
+1. `--ai-api-key` (explícita; menos segura).
+2. Variable de entorno (`OPENCODE_API_KEY` por defecto).
+3. Archivo de clave con permisos `0600`.
+4. Prompt interactivo con `getpass`; la primera vez ofrece guardarla en el
+   archivo para no repetirla.
+
+```bash
+# CI: variable de entorno
+export OPENCODE_API_KEY="oc_sk_..."
+
+# Local: archivo 0600 (recomendado)
+mkdir -p ~/.config/autocommit
+(umask 077 && printf '%s\n' "oc_sk_..." > ~/.config/autocommit/opencode_key)
+chmod 600 ~/.config/autocommit/opencode_key
+```
+
+También puedes indicar otro archivo con `--ai-api-key-file` u otra variable con
+`--ai-api-key-env`. Si usas `--ai-api-key`, la clave puede quedar en el
+historial del shell y en la lista de procesos, y la herramienta lo advierte.
+
+La clave se envía como `Authorization: Bearer ...`, junto con
 `x-opencode-session` y un `User-Agent` propio, como pide la documentación de Go.
 
 Modelos recomendados para mensajes cortos y económicos:
