@@ -7,6 +7,11 @@ __pycache__/
 venv/
 virtualenv/
 
+# Artefactos de build
+*.egg-info/
+build/
+dist/
+
 # Herramientas
 .pytest_cache/
 .ruff_cache/
