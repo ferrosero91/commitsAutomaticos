@@ -130,6 +130,7 @@ Ejemplo: `Ada Lovelace:ada-lovelace:ada@example.com:12`.
 | `--ai-api-key-file RUTA` | Archivo con la clave. | `~/.config/autocommit/opencode_key` |
 | `--ai-timeout SEGUNDOS` | Timeout por llamada. | `30` |
 | `--ai-max-calls N` | Mensajes por IA; después, heurística. | `200` |
+| `--env-file RUTA` | Carga variables `CLAVE=VALOR` antes de ejecutar. | — |
 | `--dry-run` | Mostrar el plan sin modificar el repositorio. | Desactivado |
 | `--resume` | Continuar desde `.git/autocommit/state.json`. | Desactivado |
 | `--keep-going` | Seguir si un commit falla. | Desactivado |
@@ -253,6 +254,48 @@ También puedes indicar otro archivo con `--ai-api-key-file` u otra variable con
 `--ai-api-key-env`. Si usas `--ai-api-key`, la clave puede quedar en el
 historial del shell y en la lista de procesos, y la herramienta lo advierte.
 
+### Variables de entorno
+
+La herramienta reconoce estas variables:
+
+| Variable | Uso | Ejemplo |
+| --- | --- | --- |
+| `OPENCODE_API_KEY` | Clave de OpenCode para `--ai`. | `oc_sk_...` |
+| `AUTOCOMMIT_AI_MODEL` | Modelo de IA por defecto. | `deepseek-v4.1-flash` |
+| `AUTOCOMMIT_AI_BASE_URL` | Base OpenAI-compatible. | `https://opencode.ai/inference/go/openai/v1` |
+| `AUTOCOMMIT_TOKEN_<USUARIO>` | Token de Git de un colaborador. | `AUTOCOMMIT_TOKEN_ADA_LOVELACE` |
+| `AUTOCOMMIT_CONFIG_DIR` | Directorio de configuración. | `~/.config/autocommit` |
+| `XDG_CONFIG_HOME` | Base para la configuración (XDG). | `~/.config` |
+
+Para los tokens de Git, el nombre se normaliza: mayúsculas y caracteres no
+alfanuméricos reemplazados por `_`. Por ejemplo, `ada-lovelace` usa
+`AUTOCOMMIT_TOKEN_ADA_LOVELACE`.
+
+```bash
+export OPENCODE_API_KEY="oc_sk_..."
+export AUTOCOMMIT_TOKEN_ADA_LOVELACE="ghp_..."
+export AUTOCOMMIT_TOKEN_ALAN_TURING="ghp_..."
+
+python3 -m autocommit --ai --repo ~/mi-app --branch main \
+  --collaborator "Ada Lovelace:ada-lovelace:ada@example.com:10" \
+  --collaborator "Alan Turing:alan-turing:alan@example.com:8" --yes
+```
+
+### Archivo `.env`
+
+Si prefieres un archivo en lugar de exportar variables en cada shell:
+
+```bash
+cp .env.example .env
+chmod 600 .env
+# edita .env con tus valores
+python3 -m autocommit --env-file .env --ai ...
+```
+
+`--env-file` no pisa variables que ya estén definidas en el entorno: un secreto
+de CI o un `export` explícito siempre gana. Revisa `.env.example` para ver los
+nombres disponibles. `.env` está ignorado por git; **nunca** lo confirmes.
+
 La clave se envía como `Authorization: Bearer ...`, junto con
 `x-opencode-session` y un `User-Agent` propio, como pide la documentación de Go.
 
@@ -311,6 +354,7 @@ autocommit/
 ├── planner.py         # reparto de archivos en commits
 ├── messages.py        # mensajes Conventional Commits
 ├── ai.py              # mensajes con IA (OpenCode V2)
+├── env.py             # carga explícita de archivos .env
 ├── files.py           # descubrimiento + filtrado .gitignore
 ├── security.py        # escaneo de secretos y redacción
 ├── git_repository.py  # único adaptador del binario git
