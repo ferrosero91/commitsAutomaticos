@@ -24,15 +24,18 @@ import urllib.request
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 
 from . import __version__
+from .credentials import default_config_dir, read_secret_file, write_secret_file
 from .errors import AIError, ValidationError
 from .messages import (
     MAX_SUBJECT_LENGTH,
     CommitMessageFactory,
     ConventionalCommitMessageFactory,
 )
+from .ui import Prompter
 
 DEFAULT_BASE_URL = "https://opencode.ai/inference/go/openai/v1"
 PAY_AS_YOU_GO_BASE_URL = "https://opencode.ai/inference/openai/v1"
@@ -107,6 +110,59 @@ class AIConfig:
 def api_key_from_env(variable: str = DEFAULT_API_KEY_ENV) -> str | None:
     value = os.environ.get(variable, "").strip()
     return value or None
+
+
+def default_key_file() -> Path:
+    """Archivo de clave recomendado: ``~/.config/autocommit/opencode_key``."""
+    return default_config_dir() / "opencode_key"
+
+
+def resolve_api_key(
+    *,
+    explicit: str | None = None,
+    env_var: str = DEFAULT_API_KEY_ENV,
+    key_file: Path | None = None,
+    prompter: Prompter | None = None,
+    logger: logging.Logger | None = None,
+) -> str:
+    """Resuelve la clave: argumento, entorno, archivo 0600 o prompt seguro.
+
+    El orden es deliberado: lo explícito gana, el entorno permite CI y el
+    archivo evita repetir la clave sin dejarla en el historial del shell.
+    """
+    log = logger or logging.getLogger("autocommit.ai")
+    path = Path(key_file).expanduser() if key_file is not None else default_key_file()
+
+    if explicit and explicit.strip():
+        log.warning(
+            "La clave pasada con --ai-api-key puede quedar en el historial del shell "
+            "y en la lista de procesos; prefiere la variable de entorno o el archivo."
+        )
+        return explicit.strip()
+
+    env_value = api_key_from_env(env_var)
+    if env_value:
+        return env_value
+
+    stored = read_secret_file(path)
+    if stored:
+        log.debug("Clave de OpenCode cargada desde %s.", path)
+        return stored
+
+    if prompter is None:
+        raise ValidationError(
+            "No hay clave de OpenCode. Define la variable "
+            f"{env_var}, usa --ai-api-key-file {path} "
+            "o ejecuta de forma interactiva para introducirla una vez."
+        )
+
+    value = (prompter.secret("Clave de OpenCode: ") or "").strip()
+    if not value:
+        raise ValidationError("La clave de OpenCode no puede estar vacía.")
+    if prompter.confirm(f"¿Guardar la clave en {path}?", default=True):
+        write_secret_file(path, value)
+        log.info("Clave de OpenCode guardada en %s con permisos 0600.", path)
+    return value
 
 
 class ChatClient(Protocol):

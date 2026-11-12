@@ -39,7 +39,8 @@ class TokenStore(Protocol):
         """Guarda el token."""
 
 
-def _default_config_dir() -> Path:
+def default_config_dir() -> Path:
+    """Directorio de configuración de la herramienta (XDG o ``~/.config``)."""
     override = os.environ.get("AUTOCOMMIT_CONFIG_DIR")
     if override:
         return Path(override).expanduser()
@@ -48,13 +49,46 @@ def _default_config_dir() -> Path:
     return base / "autocommit"
 
 
+def read_secret_file(path: Path) -> str | None:
+    """Lee un secreto de un archivo de texto, o ``None`` si no existe."""
+    try:
+        value = Path(path).expanduser().read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ValidationError(f"No se pudo leer el archivo de secretos {path}: {exc}") from exc
+    return value or None
+
+
+def write_secret_file(path: Path, value: str) -> None:
+    """Escribe un secreto con permisos ``0600`` y reemplazo atómico."""
+    path = Path(path).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with contextlib.suppress(OSError):
+        # Sistemas de archivos sin permisos POSIX.
+        os.chmod(path.parent, 0o700)
+
+    descriptor, temporary = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}-", suffix=".tmp"
+    )
+    temporary_path = Path(temporary)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(value.rstrip("\n") + "\n")
+        os.chmod(temporary_path, 0o600)
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink(missing_ok=True)
+
+
 class FileTokenStore:
     """Tokens en JSON con permisos restrictivos y escritura atomica."""
 
     writable = True
 
     def __init__(self, path: Path | None = None) -> None:
-        self.path = Path(path) if path is not None else _default_config_dir() / "tokens.json"
+        self.path = Path(path) if path is not None else default_config_dir() / "tokens.json"
 
     def get(self, username: str) -> str | None:
         return self._load().get(username)
@@ -88,29 +122,12 @@ class FileTokenStore:
         return {str(key): str(value) for key, value in tokens.items()}
 
     def _save(self, tokens: dict[str, str]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with contextlib.suppress(OSError):
-            # Sistemas de archivos sin permisos POSIX.
-            os.chmod(self.path.parent, 0o700)
-
-        descriptor, temporary = tempfile.mkstemp(
-            dir=str(self.path.parent), prefix=".tokens-", suffix=".json"
+        payload = json.dumps(
+            {"version": TOKENS_VERSION, "tokens": tokens},
+            indent=2,
+            ensure_ascii=False,
         )
-        temporary_path = Path(temporary)
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                json.dump(
-                    {"version": TOKENS_VERSION, "tokens": tokens},
-                    handle,
-                    indent=2,
-                    ensure_ascii=False,
-                )
-                handle.write("\n")
-            os.chmod(temporary_path, 0o600)
-            os.replace(temporary_path, self.path)
-        finally:
-            if temporary_path.exists():
-                temporary_path.unlink(missing_ok=True)
+        write_secret_file(self.path, payload)
 
 
 class EnvironmentTokenStore:

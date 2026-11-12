@@ -10,6 +10,9 @@ from autocommit.credentials import (
     EnvironmentTokenStore,
     FileTokenStore,
     TokenProvider,
+    default_config_dir,
+    read_secret_file,
+    write_secret_file,
 )
 from autocommit.errors import ValidationError
 from tests.support import ScriptedPrompter, TemporaryProjectTestCase, null_logger
@@ -43,6 +46,38 @@ class FileTokenStoreTests(TemporaryProjectTestCase):
         path.write_text("{no es json", encoding="utf-8")
         with self.assertRaises(ValidationError):
             FileTokenStore(path).get("ada")
+
+
+class SecretFileTests(TemporaryProjectTestCase):
+    def test_roundtrip(self) -> None:
+        path = self.tmp / "config" / "secret"
+        write_secret_file(path, "valor")
+        self.assertEqual(read_secret_file(path), "valor")
+
+    def test_missing_file_returns_none(self) -> None:
+        self.assertIsNone(read_secret_file(self.tmp / "no-existe"))
+
+    def test_permissions_are_restrictive(self) -> None:
+        path = self.tmp / "config" / "secret"
+        write_secret_file(path, "valor")
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
+
+    def test_overwrites_atomically(self) -> None:
+        path = self.tmp / "secret"
+        write_secret_file(path, "uno")
+        write_secret_file(path, "dos")
+        self.assertEqual(read_secret_file(path), "dos")
+        self.assertEqual(
+            [entry.name for entry in self.tmp.iterdir() if entry.name.startswith(".")],
+            [],
+        )
+
+    def test_config_dir_honors_override(self) -> None:
+        with mock.patch.dict(
+            os.environ, {"AUTOCOMMIT_CONFIG_DIR": str(self.tmp / "cfg")}, clear=True
+        ):
+            self.assertEqual(default_config_dir(), self.tmp / "cfg")
 
 
 class EnvironmentTokenStoreTests(unittest.TestCase):

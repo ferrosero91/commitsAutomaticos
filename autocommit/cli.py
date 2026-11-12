@@ -18,11 +18,12 @@ from .ai import (
     AIConfig,
     AIMessageFactory,
     OpenCodeChatClient,
-    api_key_from_env,
+    default_key_file,
+    resolve_api_key,
 )
 from .app import Application, RunRequest
 from .credentials import TokenProvider, build_default_token_store
-from .errors import AutocommitError, ValidationError
+from .errors import AutocommitError
 from .logging_setup import configure_logging
 from .messages import CommitMessageFactory, ConventionalCommitMessageFactory
 from .settings import Settings
@@ -116,6 +117,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Variable de entorno que contiene la clave de OpenCode.",
     )
     parser.add_argument(
+        "--ai-api-key",
+        metavar="CLAVE",
+        help="Clave de OpenCode (insegura: queda en el historial del shell).",
+    )
+    parser.add_argument(
+        "--ai-api-key-file",
+        type=Path,
+        default=default_key_file(),
+        metavar="RUTA",
+        help="Archivo con la clave; se guarda con permisos 0600 si se solicita.",
+    )
+    parser.add_argument(
         "--ai-timeout",
         type=float,
         default=30.0,
@@ -176,17 +189,20 @@ def build_message_factory(
     args: argparse.Namespace,
     settings: Settings,
     logger: logging.Logger,
+    *,
+    prompter: Prompter | None = None,
 ) -> CommitMessageFactory | None:
     """Construye el generador de mensajes con IA si se solicitó."""
     if not args.ai:
         return None
 
-    api_key = api_key_from_env(args.ai_api_key_env)
-    if api_key is None:
-        raise ValidationError(
-            f"Falta la variable de entorno {args.ai_api_key_env}. "
-            "Crea una clave en https://opencode.ai/console y expórtala antes de usar --ai."
-        )
+    api_key = resolve_api_key(
+        explicit=args.ai_api_key,
+        env_var=args.ai_api_key_env,
+        key_file=args.ai_api_key_file,
+        prompter=prompter,
+        logger=logger,
+    )
 
     config = AIConfig(
         api_key=api_key,
@@ -225,7 +241,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         collaborators = tuple(parse_collaborator(spec) for spec in args.collaborator)
         ai_logger = logging.getLogger("autocommit.ai")
-        message_factory = build_message_factory(args, settings, ai_logger)
+        message_factory = build_message_factory(
+            args,
+            settings,
+            ai_logger,
+            prompter=prompter if interactive else None,
+        )
         tokens = TokenProvider(
             build_default_token_store(),
             prompter,

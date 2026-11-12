@@ -5,6 +5,7 @@ import json
 import os
 import unittest
 import urllib.error
+from pathlib import Path
 from unittest import mock
 
 from autocommit import __version__
@@ -15,12 +16,14 @@ from autocommit.ai import (
     AIMessageFactory,
     OpenCodeChatClient,
     build_user_prompt,
+    resolve_api_key,
     sanitize_message,
 )
 from autocommit.cli import build_message_factory, build_parser
+from autocommit.credentials import read_secret_file, write_secret_file
 from autocommit.errors import AIError, ValidationError
 from autocommit.settings import Settings
-from tests.support import null_logger
+from tests.support import ScriptedPrompter, TemporaryProjectTestCase, null_logger
 
 
 class FakeResponse:
@@ -307,24 +310,116 @@ class AIMessageFactoryTests(unittest.TestCase):
             AIMessageFactory(StubClient("feat: x"), StubFallback()).create([])
 
 
-class CliWiringTests(unittest.TestCase):
+class ResolveApiKeyTests(TemporaryProjectTestCase):
+    def key_file(self) -> Path:
+        return self.tmp / "opencode_key"
+
+    def test_explicit_key_wins(self) -> None:
+        write_secret_file(self.key_file(), "oc_sk_file")
+        with mock.patch.dict(os.environ, {"OPENCODE_API_KEY": "oc_sk_env"}, clear=True):
+            value = resolve_api_key(
+                explicit="oc_sk_explicit",
+                key_file=self.key_file(),
+                logger=null_logger("ai"),
+            )
+        self.assertEqual(value, "oc_sk_explicit")
+
+    def test_environment_wins_over_file(self) -> None:
+        write_secret_file(self.key_file(), "oc_sk_file")
+        with mock.patch.dict(os.environ, {"OPENCODE_API_KEY": "oc_sk_env"}, clear=True):
+            value = resolve_api_key(key_file=self.key_file(), logger=null_logger("ai"))
+        self.assertEqual(value, "oc_sk_env")
+
+    def test_reads_key_file(self) -> None:
+        write_secret_file(self.key_file(), "oc_sk_file")
+        with mock.patch.dict(os.environ, {}, clear=True):
+            value = resolve_api_key(key_file=self.key_file(), logger=null_logger("ai"))
+        self.assertEqual(value, "oc_sk_file")
+
+    def test_prompts_and_saves_key(self) -> None:
+        prompter = ScriptedPrompter(secrets=["oc_sk_prompt"], confirmations=[True])
+        with mock.patch.dict(os.environ, {}, clear=True):
+            value = resolve_api_key(
+                key_file=self.key_file(),
+                prompter=prompter,
+                logger=null_logger("ai"),
+            )
+        self.assertEqual(value, "oc_sk_prompt")
+        self.assertEqual(read_secret_file(self.key_file()), "oc_sk_prompt")
+
+    def test_prompts_without_saving(self) -> None:
+        prompter = ScriptedPrompter(secrets=["oc_sk_prompt"], confirmations=[False])
+        with mock.patch.dict(os.environ, {}, clear=True):
+            value = resolve_api_key(
+                key_file=self.key_file(),
+                prompter=prompter,
+                logger=null_logger("ai"),
+            )
+        self.assertEqual(value, "oc_sk_prompt")
+        self.assertIsNone(read_secret_file(self.key_file()))
+
+    def test_rejects_empty_prompt(self) -> None:
+        prompter = ScriptedPrompter(secrets=["   "])
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            self.assertRaises(ValidationError),
+        ):
+            resolve_api_key(
+                key_file=self.key_file(),
+                prompter=prompter,
+                logger=null_logger("ai"),
+            )
+
+    def test_requires_a_key_without_prompter(self) -> None:
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            self.assertRaises(ValidationError) as context,
+        ):
+            resolve_api_key(key_file=self.key_file(), logger=null_logger("ai"))
+        self.assertIn("OPENCODE_API_KEY", str(context.exception))
+        self.assertIn("--ai-api-key-file", str(context.exception))
+
+
+class CliWiringTests(TemporaryProjectTestCase):
+    def parse(self, *extra: str) -> object:
+        return build_parser().parse_args(
+            ["--ai", "--ai-api-key-file", str(self.tmp / "missing_key"), *extra]
+        )
+
     def test_ai_is_disabled_by_default(self) -> None:
         args = build_parser().parse_args([])
         self.assertIsNone(build_message_factory(args, Settings(), null_logger("cli")))
 
     def test_ai_requires_api_key(self) -> None:
-        args = build_parser().parse_args(["--ai"])
-        with mock.patch.dict(os.environ, {}, clear=True), self.assertRaises(ValidationError):
+        args = self.parse()
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            self.assertRaises(ValidationError),
+        ):
             build_message_factory(args, Settings(), null_logger("cli"))
 
-    def test_ai_builds_factory_with_key(self) -> None:
-        args = build_parser().parse_args(["--ai"])
+    def test_ai_builds_factory_with_environment_key(self) -> None:
+        args = self.parse()
         with mock.patch.dict(os.environ, {"OPENCODE_API_KEY": "oc_sk_test"}, clear=True):
             factory = build_message_factory(args, Settings(seed=1), null_logger("cli"))
         self.assertIsInstance(factory, AIMessageFactory)
 
+    def test_ai_builds_factory_with_explicit_key(self) -> None:
+        args = self.parse("--ai-api-key", "oc_sk_explicit")
+        with mock.patch.dict(os.environ, {}, clear=True):
+            factory = build_message_factory(args, Settings(seed=1), null_logger("cli"))
+        self.assertIsInstance(factory, AIMessageFactory)
+
+    def test_ai_builds_factory_with_key_file(self) -> None:
+        key_file = self.tmp / "opencode_key"
+        write_secret_file(key_file, "oc_sk_file")
+        args = build_parser().parse_args(["--ai", "--ai-api-key-file", str(key_file)])
+        with mock.patch.dict(os.environ, {}, clear=True):
+            factory = build_message_factory(args, Settings(seed=1), null_logger("cli"))
+        self.assertIsInstance(factory, AIMessageFactory)
+
     def test_custom_key_variable(self) -> None:
-        args = build_parser().parse_args(["--ai", "--ai-api-key-env", "MI_CLAVE"])
+        args = self.parse("--ai-api-key-env", "MI_CLAVE")
         with mock.patch.dict(os.environ, {"MI_CLAVE": "oc_sk_test"}, clear=True):
             factory = build_message_factory(args, Settings(seed=1), null_logger("cli"))
         self.assertIsInstance(factory, AIMessageFactory)
