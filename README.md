@@ -72,6 +72,21 @@ python3 -m autocommit \
   --yes
 ```
 
+Con mensajes generados por IA (OpenCode) y respaldo heurístico:
+
+```bash
+export OPENCODE_API_KEY="oc_sk_..."
+
+python3 -m autocommit \
+  --repo ~/proyectos/mi-app \
+  --remote-url https://github.com/mi-org/mi-app.git \
+  --branch main \
+  --collaborator "Ada Lovelace:ada-lovelace:ada@example.com:12" \
+  --ai \
+  --ai-model deepseek-v4.1-flash \
+  --yes
+```
+
 Simulación sin tocar el repositorio:
 
 ```bash
@@ -107,6 +122,12 @@ Ejemplo: `Ada Lovelace:ada-lovelace:ada@example.com:12`.
 | `--delay SEGUNDOS` | Espera entre pushes. | `0` |
 | `--max-file-size-mb MB` | Tamaño máximo por archivo. | `10` |
 | `--allow-secrets` | No bloquear posibles secretos (no recomendado). | Desactivado |
+| `--ai` | Generar mensajes con OpenCode; si falla, usa la heurística. | Desactivado |
+| `--ai-model MODELO` | Modelo de OpenCode. | `deepseek-v4.1-flash` |
+| `--ai-base-url URL` | Base OpenAI-compatible (Go o pay-as-you-go). | Go V2 |
+| `--ai-api-key-env VAR` | Variable con la clave. | `OPENCODE_API_KEY` |
+| `--ai-timeout SEGUNDOS` | Timeout por llamada. | `30` |
+| `--ai-max-calls N` | Mensajes por IA; después, heurística. | `200` |
 | `--dry-run` | Mostrar el plan sin modificar el repositorio. | Desactivado |
 | `--resume` | Continuar desde `.git/autocommit/state.json`. | Desactivado |
 | `--keep-going` | Seguir si un commit falla. | Desactivado |
@@ -185,6 +206,61 @@ límite de tamaño. Úsalo solo tras revisar el contenido.
   `tipo(scope): descripción`, con una heurística basada en rutas y extensiones.
 - Los mensajes no analizan el diff: describen el grupo de archivos.
 
+## Mensajes con IA (OpenCode)
+
+La generación con IA es opcional. Usa el protocolo OpenAI Chat Completions que
+OpenCode Console y OpenCode Go exponen en su API V2:
+
+| Plan | Base URL | Ruta |
+| --- | --- | --- |
+| Go | `https://opencode.ai/inference/go` | `/openai/v1/chat/completions` |
+| Pay-as-you-go | `https://opencode.ai/inference` | `/openai/v1/chat/completions` |
+
+El valor de `--ai-base-url` es la base que usarías en un SDK de OpenAI, es
+decir, incluye `/openai/v1`:
+
+```bash
+# Go (por defecto)
+export AUTOCOMMIT_AI_BASE_URL="https://opencode.ai/inference/go/openai/v1"
+
+# Pay-as-you-go
+export AUTOCOMMIT_AI_BASE_URL="https://opencode.ai/inference/openai/v1"
+```
+
+La clave se lee de `OPENCODE_API_KEY` (o de la variable indicada con
+`--ai-api-key-env`). Se envía como `Authorization: Bearer ...`, junto con
+`x-opencode-session` y un `User-Agent` propio, como pide la documentación de Go.
+
+Modelos recomendados para mensajes cortos y económicos:
+
+- `deepseek-v4.1-flash` (por defecto)
+- `glm-5.3-flash`
+- `kimi-k2.7-code`
+- `qwen3.8-flash`
+
+Notas de la API V2:
+
+- `https://opencode.ai/zen/go/v1` era la base anterior (Zen). Sigue funcionando
+  como endpoint compatible, pero la documentación actual usa
+  `https://opencode.ai/inference/go`.
+- Los modelos gratuitos solo se pueden usar desde OpenCode; desde otros
+  clientes, como esta herramienta, responden `403`. Usa un modelo de pago o una
+  suscripción Go.
+- Consulta el catálogo actual con `curl https://opencode.ai/inference/v1/models`.
+
+### Respaldo y coste
+
+- Solo se envían las **rutas** de los archivos, nunca su contenido.
+- Si la red, la clave o el formato de la respuesta fallan, se usa el generador
+  heurístico y el proceso continúa.
+- `--ai-max-calls` limita el gasto; al alcanzarlo se vuelve a la heurística.
+- Una respuesta se acepta solo si cumple Conventional Commits y cabe en 72
+  caracteres; el resto se descarta.
+- Con `--dry-run --ai` también se generan mensajes (y se consume cuota).
+
+> **Nunca incrustes claves de API en el código ni en el repositorio.** Si una
+> clave se filtró, revócala en la consola del proveedor y genera otra.
+
 ## Reanudación e idempotencia
 
 El progreso se guarda en `.git/autocommit/state.json` (sin tokens):
@@ -209,6 +285,7 @@ autocommit/
 ├── settings.py        # configuración inmutable validada
 ├── planner.py         # reparto de archivos en commits
 ├── messages.py        # mensajes Conventional Commits
+├── ai.py              # mensajes con IA (OpenCode V2)
 ├── files.py           # descubrimiento + filtrado .gitignore
 ├── security.py        # escaneo de secretos y redacción
 ├── git_repository.py  # único adaptador del binario git
@@ -225,8 +302,8 @@ Principios aplicados:
 - **Responsabilidad única:** cada módulo resuelve un único problema.
 - **Inversión de dependencias:** `Application` recibe fábricas y protocolos;
   no construye infraestructura concreta.
-- **Abierto/cerrado:** el generador de mensajes y el validador son
-  sustituibles sin modificar la aplicación.
+- **Abierto/cerrado:** el generador de mensajes (heurístico o IA) y el
+  validador son sustituibles sin modificar la aplicación.
 - **Segregación de interfaces:** `Prompter`, `TokenStore` y
   `CommitMessageFactory` son protocolos pequeños.
 - **Sustitución de Liskov:** `NonInteractivePrompter` reemplaza a
@@ -273,6 +350,8 @@ python3 -m autocommit --delay 30 --push-every 1
 - Los mensajes son heurísticos y no interpretan el contenido del diff.
 - El escaneo de secretos es heurístico y solo lee los primeros 512 KB de cada
   archivo.
+- Los mensajes con IA dependen de un servicio externo; el respaldo heurístico
+  no interpreta el contenido del diff.
 - No firma commits con GPG.
 - Se omiten submódulos y repositorios anidados.
 
