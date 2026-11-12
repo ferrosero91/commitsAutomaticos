@@ -26,7 +26,12 @@ class ApplicationTests(TemporaryProjectTestCase):
         self._tokens_dir = tempfile.TemporaryDirectory(prefix="autocommit-tokens-")
         self.addCleanup(self._tokens_dir.cleanup)
 
-    def make_app(self, settings: Settings, prompter: ScriptedPrompter | None = None) -> Application:
+    def make_app(
+        self,
+        settings: Settings,
+        prompter: ScriptedPrompter | None = None,
+        **kwargs: object,
+    ) -> Application:
         prompter = prompter or ScriptedPrompter()
         store = FileTokenStore(Path(self._tokens_dir.name) / "tokens.json")
         store.set("ada", TOKEN)
@@ -38,6 +43,7 @@ class ApplicationTests(TemporaryProjectTestCase):
             tokens,
             logger=null_logger("app"),
             sleeper=lambda _seconds: None,
+            **kwargs,  # type: ignore[arg-type]
         )
 
     def collaborators(self) -> tuple[Collaborator, ...]:
@@ -202,6 +208,41 @@ class ApplicationTests(TemporaryProjectTestCase):
         self.assertEqual(remote_count, "1")
         self.assertEqual(self.git_stdout("config", "--local", "--get", "user.name").strip(), "Prev")
         self.assertFalse(state_store.exists())
+
+    def test_cancellation_between_commits_keeps_resumable_state(self) -> None:
+        repo = self.init_repo()
+        self.write("a.py", "print('a')\n")
+        self.write("b.py", "print('b')\n")
+        remote = self.init_bare_remote()
+
+        checks = {"count": 0}
+
+        def cancelled() -> bool:
+            checks["count"] += 1
+            return checks["count"] > 1
+
+        app = self.make_app(Settings(push_every=0), cancelled=cancelled)
+        summary = app.run(
+            RunRequest(
+                repo_path=repo,
+                remote_url=str(remote),
+                branch="main",
+                collaborators=(Collaborator("Ada Lovelace", "ada", "ada@example.com", 2),),
+                assume_yes=True,
+                non_interactive=True,
+            )
+        )
+
+        self.assertTrue(summary.aborted)
+        self.assertEqual(summary.commits_created, 1)
+        self.assertEqual(summary.pushes, 0)
+        self.assertEqual(self.git_stdout("rev-list", "--count", "main").strip(), "1")
+
+        state = StateStore.in_git_dir(GitRepository(repo, logger=null_logger("git")).git_dir).load()
+        self.assertIsNotNone(state)
+        assert state is not None
+        self.assertEqual(state.completed, frozenset({0}))
+        self.assertEqual(state.pushed, -1)
 
     def test_dry_run_without_remote(self) -> None:
         repo = self.init_repo()

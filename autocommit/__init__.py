@@ -11,8 +11,12 @@ El paquete está organizado por responsabilidades (ver README):
     messages       -> generación de mensajes de commit
     credentials    -> almacenamiento seguro de tokens
     state          -> persistencia para reanudar ejecuciones
+    ai             -> mensajes con IA (OpenCode) y respaldo heurístico
+    env            -> carga de archivos .env
+    gui            -> interfaz gráfica (tkinter)
+    gui_state      -> validación y estado de la interfaz
 """
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 __all__ = ["__version__"]

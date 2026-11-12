@@ -88,12 +88,14 @@ class Application:
         state_factory: StateFactory | None = None,
         folder_picker: FolderPicker | None = None,
         sleeper: Callable[[float], None] = countdown,
+        cancelled: Callable[[], bool] | None = None,
     ) -> None:
         self.settings = settings
         self.logger = logger or logging.getLogger("autocommit.app")
         self._prompter = prompter
         self._tokens = tokens
         self._wait = sleeper
+        self._cancelled = cancelled or (lambda: False)
 
         rng = random.Random(settings.seed) if settings.seed is not None else None
         self._messages = message_factory or ConventionalCommitMessageFactory(rng)
@@ -403,8 +405,18 @@ class Application:
         last_pushed = pushed
         last_collaborator = self._last_collaborator(plan, completed)
 
+        cancelled = False
+
         try:
             for position, commit in enumerate(pending):
+                if self._cancelled():
+                    cancelled = True
+                    summary.aborted = True
+                    self.logger.warning(
+                        "Detención solicitada; se conserva el estado para reanudar con --resume."
+                    )
+                    break
+
                 target_identity = Identity(commit.collaborator.name, commit.collaborator.email)
                 if target_identity != current_identity:
                     repo.set_identity(target_identity)
@@ -457,7 +469,7 @@ class Application:
                         self._wait(self.settings.delay_seconds)
 
             highest_completed = max(completed, default=-1)
-            if last_collaborator is not None and last_pushed < highest_completed:
+            if not cancelled and last_collaborator is not None and last_pushed < highest_completed:
                 self._push(repo, plan.branch, last_collaborator, summary)
                 last_pushed = highest_completed
                 state_store.save(plan, completed, last_pushed)

@@ -41,6 +41,11 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"autocommit {__version__}")
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Abre la interfaz gráfica en lugar de la consola.",
+    )
 
     parser.add_argument(
         "--repo",
@@ -254,6 +259,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.env_file,
             ", ".join(sorted(applied)) or "ninguna nueva",
         )
+
+    if args.gui:
+        try:
+            from .gui import launch_gui
+        except ImportError as exc:
+            logger.error("La interfaz gráfica requiere tkinter: %s", exc)
+            return 2
+        return launch_gui()
 
     interactive = not args.non_interactive and sys.stdin.isatty()
     prompter: Prompter = ConsolePrompter() if interactive else NonInteractivePrompter()
