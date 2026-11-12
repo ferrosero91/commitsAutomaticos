@@ -557,9 +557,11 @@ class AutocommitWindow(tk.Tk):
         if self._worker is None or not self._worker.is_alive():
             return
         self._stop.set()
-        self._status.set("Detención solicitada…")
+        self._stop_button.state(["disabled"])
+        self._status.set("Deteniendo… (se terminará la operación actual)")
         logging.getLogger("autocommit").warning(
-            "Detención solicitada; se terminará el paso actual antes de parar."
+            "Detención solicitada: se cancelará la planificación/IA pendiente y "
+            "se parará entre commits. Una operación de git en curso termina antes."
         )
 
     def _set_running(self, running: bool) -> None:

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import random
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -270,13 +272,57 @@ class ApplicationTests(TemporaryProjectTestCase):
         self.write("b.py", "print('b')\n")
         remote = self.init_bare_remote()
 
-        checks = {"count": 0}
+        event = threading.Event()
+        app = self.make_app(Settings(push_every=0), cancelled=event.is_set)
+        original_commit = GitRepository.commit
 
-        def cancelled() -> bool:
-            checks["count"] += 1
-            return checks["count"] > 1
+        def commit_and_cancel(repo_self: GitRepository, message: str) -> str:
+            sha = original_commit(repo_self, message)
+            event.set()
+            return sha
 
-        app = self.make_app(Settings(push_every=0), cancelled=cancelled)
+        with mock.patch.object(GitRepository, "commit", commit_and_cancel):
+            summary = app.run(
+                RunRequest(
+                    repo_path=repo,
+                    remote_url=str(remote),
+                    branch="main",
+                    collaborators=(Collaborator("Ada Lovelace", "ada", "ada@example.com", 2),),
+                    assume_yes=True,
+                    non_interactive=True,
+                )
+            )
+
+        self.assertTrue(summary.aborted)
+        self.assertEqual(summary.commits_created, 1)
+        self.assertEqual(summary.pushes, 0)
+        self.assertEqual(self.git_stdout("rev-list", "--count", "main").strip(), "1")
+
+        state = StateStore.in_git_dir(GitRepository(repo, logger=null_logger("git")).git_dir).load()
+        self.assertIsNotNone(state)
+        assert state is not None
+        self.assertEqual(state.completed, frozenset({0}))
+        self.assertEqual(state.pushed, -1)
+
+    def test_cancellation_during_planning_leaves_repository_untouched(self) -> None:
+        repo = self.init_repo()
+        self.write("a.py", "print('a')\n")
+        self.write("b.py", "print('b')\n")
+        remote = self.init_bare_remote()
+
+        event = threading.Event()
+
+        class CancellingFactory:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def create(self, files: list[str]) -> str:
+                self.calls += 1
+                event.set()
+                return "feat: mensaje"
+
+        factory = CancellingFactory()
+        app = self.make_app(Settings(), message_factory=factory, cancelled=event.is_set)
         summary = app.run(
             RunRequest(
                 repo_path=repo,
@@ -289,15 +335,27 @@ class ApplicationTests(TemporaryProjectTestCase):
         )
 
         self.assertTrue(summary.aborted)
-        self.assertEqual(summary.commits_created, 1)
-        self.assertEqual(summary.pushes, 0)
-        self.assertEqual(self.git_stdout("rev-list", "--count", "main").strip(), "1")
+        self.assertEqual(factory.calls, 1)
+        self.assertNotEqual(self.git("rev-parse", "--verify", "HEAD").returncode, 0)
+        self.assertFalse((repo / ".git" / "autocommit" / "state.json").exists())
 
-        state = StateStore.in_git_dir(GitRepository(repo, logger=null_logger("git")).git_dir).load()
-        self.assertIsNotNone(state)
-        assert state is not None
-        self.assertEqual(state.completed, frozenset({0}))
-        self.assertEqual(state.pushed, -1)
+    def test_delay_reacts_to_cancellation(self) -> None:
+        event = threading.Event()
+        app = Application(
+            Settings(),
+            ScriptedPrompter(),
+            TokenProvider(
+                FileTokenStore(self.tmp / "tokens.json"),
+                ScriptedPrompter(),
+                logger=null_logger("tokens"),
+            ),
+            logger=null_logger("app"),
+            cancelled=event.is_set,
+        )
+        event.set()
+        started = time.monotonic()
+        app._delay(5)
+        self.assertLess(time.monotonic() - started, 1.0)
 
     def test_dry_run_without_remote(self) -> None:
         repo = self.init_repo()

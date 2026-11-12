@@ -28,6 +28,10 @@ class AIError(AutocommitError):
     """El proveedor de mensajes con IA no respondió o devolvió algo inválido."""
 
 
+class OperationCancelled(AutocommitError):
+    """El usuario solicitó detener la ejecución."""
+
+
 class GitError(AutocommitError):
     """Un comando de git terminó con un código de salida distinto de cero."""
 

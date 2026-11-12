@@ -79,9 +79,11 @@ La ventana tiene cuatro pestañas:
 - **Registro:** salida en vivo, progreso y resultado.
 
 Botones **Previsualizar** (simulación, no toca el repositorio), **Ejecutar** y
-**Detener** (termina el paso actual y deja el estado para reanudar). La GUI usa
-el mismo motor que la CLI y comparte tokens, archivo `.env` y configuración de
-IA.
+**Detener**. Detener cancela la planificación (incluidas las llamadas a IA) y se
+aplica entre commits y durante las esperas; si hay un `fetch` o un `push` en
+curso, termina antes de parar. El estado queda guardado para reanudar. La GUI
+usa el mismo motor que la CLI y comparte tokens, archivo `.env` y configuración
+de IA.
 
 Se eligió Tkinter por ser parte de la biblioteca estándar y no añadir un runtime
 extra; Flet queda como alternativa si más adelante se prioriza una estética

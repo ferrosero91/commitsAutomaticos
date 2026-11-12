@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import logging
 import random
+import time
 from collections import Counter
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from .credentials import TokenProvider
-from .errors import GitError, ValidationError
+from .errors import GitError, OperationCancelled, ValidationError
 from .files import FileDiscovery, GitIgnoreFilter
 from .git_repository import (
     REMOTE_NAME,
@@ -71,6 +72,19 @@ class RunSummary:
         return not self.aborted and self.failures == 0
 
 
+class _GuardedMessageFactory:
+    """Comprueba la cancelación antes de generar cada mensaje (incluida la IA)."""
+
+    def __init__(self, factory: CommitMessageFactory, cancelled: Callable[[], bool]) -> None:
+        self._factory = factory
+        self._cancelled = cancelled
+
+    def create(self, files: Sequence[str]) -> str:
+        if self._cancelled():
+            raise OperationCancelled("Ejecución cancelada durante la planificación.")
+        return self._factory.create(files)
+
+
 class Application:
     """Coordina una ejecución de principio a fin."""
 
@@ -98,7 +112,8 @@ class Application:
         self._cancelled = cancelled or (lambda: False)
 
         rng = random.Random(settings.seed) if settings.seed is not None else None
-        self._messages = message_factory or ConventionalCommitMessageFactory(rng)
+        base_messages = message_factory or ConventionalCommitMessageFactory(rng)
+        self._messages = _GuardedMessageFactory(base_messages, self._cancelled)
         self._planner = CommitPlanner(settings, self._messages)
 
         self._repo_factory = repo_factory or self._default_repo_factory
@@ -115,6 +130,11 @@ class Application:
 
     def run(self, request: RunRequest) -> RunSummary:
         summary = RunSummary(dry_run=self.settings.dry_run)
+        if self._cancelled():
+            summary.aborted = True
+            self.logger.warning("Ejecución cancelada antes de empezar.")
+            return summary
+
         repo = self._open_repository(request)
         resumed = self._load_state(repo)
 
@@ -128,7 +148,18 @@ class Application:
         else:
             files = self._collect_files(repo)
             collaborators = self._resolve_collaborators(request)
-            plan = self._planner.build(files, collaborators, branch)
+            if self._cancelled():
+                summary.aborted = True
+                self.logger.warning("Ejecución cancelada antes de planificar.")
+                return summary
+            try:
+                plan = self._planner.build(files, collaborators, branch)
+            except OperationCancelled:
+                summary.aborted = True
+                self.logger.warning(
+                    "Ejecución cancelada durante la planificación; no se modificó el repositorio."
+                )
+                return summary
             completed = set()
             pushed = -1
 
@@ -138,6 +169,11 @@ class Application:
         summary.planned_commits = plan.total_commits
         summary.planned_files = plan.total_files
         self._log_plan(plan, completed)
+
+        if self._cancelled():
+            summary.aborted = True
+            self.logger.warning("Ejecución cancelada antes de confirmar.")
+            return summary
 
         if not self._confirm(request, plan, completed):
             summary.aborted = True
@@ -400,14 +436,17 @@ class Application:
         if not pending:
             self.logger.info("No hay commits pendientes; se comprobará si falta algún push.")
 
+        if self._cancelled():
+            summary.aborted = True
+            self.logger.warning("Ejecución cancelada antes del primer commit.")
+            return pushed
+
         state_store = self._state_factory(repo.git_dir)
         previous_identity = repo.capture_identity()
         current_identity: Identity | None = None
         since_push = 0
         last_pushed = pushed
         last_collaborator = self._last_collaborator(plan, completed)
-
-        cancelled = False
 
         try:
             highest_completed = max(completed, default=-1)
@@ -422,7 +461,6 @@ class Application:
 
             for position, commit in enumerate(pending):
                 if self._cancelled():
-                    cancelled = True
                     summary.aborted = True
                     self.logger.warning(
                         "Detención solicitada; se conserva el estado para reanudar con --resume."
@@ -443,7 +481,7 @@ class Application:
                     since_push = 0
                     state_store.save(plan, completed, last_pushed)
                     if self.settings.delay_seconds > 0 and position < len(pending) - 1:
-                        self._wait(self.settings.delay_seconds)
+                        self._delay(self.settings.delay_seconds)
 
                 target_identity = Identity(commit.collaborator.name, commit.collaborator.email)
                 if target_identity != current_identity:
@@ -494,10 +532,16 @@ class Application:
                     since_push = 0
                     state_store.save(plan, completed, last_pushed)
                     if self.settings.delay_seconds > 0 and position < len(pending) - 1:
-                        self._wait(self.settings.delay_seconds)
+                        self._delay(self.settings.delay_seconds)
 
             highest_completed = max(completed, default=-1)
-            if not cancelled and last_collaborator is not None and last_pushed < highest_completed:
+            if self._cancelled():
+                summary.aborted = True
+                self.logger.warning(
+                    "Detención solicitada; no se hará el push final y el estado "
+                    "queda disponible para reanudar."
+                )
+            elif last_collaborator is not None and last_pushed < highest_completed:
                 self._push(repo, plan.branch, last_collaborator, summary)
                 last_pushed = highest_completed
                 state_store.save(plan, completed, last_pushed)
@@ -505,6 +549,20 @@ class Application:
             return last_pushed
         finally:
             repo.restore_identity(previous_identity)
+
+    def _delay(self, seconds: float) -> None:
+        """Espera interrumpible: reacciona a «Detener» en menos de 0,2 s."""
+        if seconds <= 0 or self._cancelled():
+            return
+        if self._wait is not countdown:
+            # Doble de prueba o espera personalizada (tests sin latencia real).
+            self._wait(seconds)
+            return
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if self._cancelled():
+                return
+            time.sleep(min(0.2, max(0.0, deadline - time.monotonic())))
 
     @staticmethod
     def _last_collaborator(plan: CommitPlan, completed: set[int]) -> Collaborator | None:
