@@ -20,6 +20,7 @@ from tkinter.scrolledtext import ScrolledText
 from . import __version__
 from .ai import DEFAULT_BASE_URL, DEFAULT_MODEL
 from .app import Application, RunSummary
+from .credentials import default_config_dir
 from .errors import AutocommitError, ValidationError
 from .gui_state import (
     CollaboratorDraft,
@@ -30,7 +31,7 @@ from .gui_state import (
     validate_form,
 )
 from .models import Collaborator
-from .security import redact
+from .security import RedactingFilter, redact
 from .ui import NonInteractivePrompter
 
 AI_MODELS = (
@@ -173,6 +174,12 @@ class AutocommitWindow(tk.Tk):
         self._configure_logging()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(150, self._drain)
+
+        logging.getLogger("autocommit").info(
+            "GUI %s iniciada. Log: %s",
+            __version__,
+            getattr(self, "_log_path", "solo consola"),
+        )
 
     # ------------------------------------------------------------------ layout
 
@@ -633,6 +640,26 @@ class AutocommitWindow(tk.Tk):
             handler.close()
         logger.addHandler(_QueueLogHandler(self._queue))
 
+        self._log_path: Path | None = None
+        try:
+            log_path = default_config_dir() / "gui.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            file_handler = logging.FileHandler(log_path, encoding="utf-8")
+            file_handler.setLevel(logging.INFO)
+            file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(message)s"))
+            file_handler.addFilter(RedactingFilter())
+            logger.addHandler(file_handler)
+            self._log_path = log_path
+        except OSError:
+            # Si no se puede escribir el log, la GUI sigue funcionando.
+            self._log_path = None
+
+    def report_callback_exception(self, exc, value, traceback) -> None:
+        """Registra los errores de callbacks de Tk en vez de solo imprimirlos."""
+        logging.getLogger("autocommit").error(
+            "Error en la interfaz: %s", value, exc_info=(exc, value, traceback)
+        )
+
     def _clear_log(self) -> None:
         self._log.configure(state="normal")
         self._log.delete("1.0", "end")
@@ -661,6 +688,7 @@ class AutocommitWindow(tk.Tk):
     # ----------------------------------------------------------------- close
 
     def _on_close(self) -> None:
+        logging.getLogger("autocommit").info("Cerrando la ventana de la GUI.")
         if self._worker is not None and self._worker.is_alive():
             if not messagebox.askyesno(
                 "Salir",
@@ -679,7 +707,11 @@ def main() -> int:
     except tk.TclError as exc:
         print(f"No se pudo abrir la interfaz gráfica: {exc}", file=sys.stderr)
         return 2
-    window.mainloop()
+    logger = logging.getLogger("autocommit")
+    try:
+        window.mainloop()
+    finally:
+        logger.info("GUI cerrada.")
     return 0
 
 

@@ -17,6 +17,6 @@ El paquete está organizado por responsabilidades (ver README):
     gui_state      -> validación y estado de la interfaz
 """
 
-__version__ = "2.2.3"
+__version__ = "2.2.4"
 
 __all__ = ["__version__"]

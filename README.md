@@ -85,6 +85,10 @@ curso, termina antes de parar. El estado queda guardado para reanudar. La GUI
 usa el mismo motor que la CLI y comparte tokens, archivo `.env` y configuración
 de IA.
 
+La actividad de la GUI se registra en `~/.config/autocommit/gui.log` (o bajo
+`AUTOCOMMIT_CONFIG_DIR`), con las credenciales redactadas; sirve para diagnosticar
+cierres o errores inesperados.
+
 Se eligió Tkinter por ser parte de la biblioteca estándar y no añadir un runtime
 extra; Flet queda como alternativa si más adelante se prioriza una estética
 web. La lógica de validación está separada en `gui_state.py` para poder probarla
