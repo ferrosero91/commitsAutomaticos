@@ -1,0 +1,4 @@
+# Dependencias solo para desarrollo.
+# Las pruebas usan unittest (stdlib), por lo que pytest es opcional.
+pytest>=8.0
+ruff>=0.6

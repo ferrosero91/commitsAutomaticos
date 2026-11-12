@@ -1,0 +1,2 @@
+# Sin dependencias de runtime: autocommit usa únicamente la biblioteca estándar
+# de Python y el binario `git` del sistema (>= 2.25).
