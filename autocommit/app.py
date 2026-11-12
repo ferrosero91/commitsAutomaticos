@@ -342,9 +342,9 @@ class Application:
     def _log_plan(self, plan: CommitPlan, completed: set[int]) -> None:
         pending = plan.total_commits - len(completed)
         push_label = (
-            "único al final"
+            "al final de cada colaborador"
             if self.settings.push_every == 0
-            else f"cada {self.settings.push_every} commit(s)"
+            else f"cada {self.settings.push_every} commit(s) por colaborador"
         )
         self.logger.info(
             "Plan: %d commits (%d pendientes), %d archivos, %d colaborador(es).",
@@ -354,6 +354,8 @@ class Application:
             plan.collaborator_count,
         )
         self.logger.info("  Rama: %s | push: %s", plan.branch, push_label)
+        if plan.collaborator_count > 1:
+            self.logger.info("  Cada push se autentica con el token del autor de su bloque.")
         for collaborator, count in Counter(commit.collaborator for commit in plan.commits).items():
             self.logger.info(
                 "  - %s (@%s): %d commits", collaborator.name, collaborator.username, count
@@ -408,6 +410,16 @@ class Application:
         cancelled = False
 
         try:
+            highest_completed = max(completed, default=-1)
+            if (
+                last_collaborator is not None
+                and last_pushed < highest_completed
+                and repo.has_commits()
+            ):
+                self._push(repo, plan.branch, last_collaborator, summary)
+                last_pushed = highest_completed
+                state_store.save(plan, completed, last_pushed)
+
             for position, commit in enumerate(pending):
                 if self._cancelled():
                     cancelled = True
@@ -416,6 +428,22 @@ class Application:
                         "Detención solicitada; se conserva el estado para reanudar con --resume."
                     )
                     break
+
+                if (
+                    last_collaborator is not None
+                    and commit.collaborator != last_collaborator
+                    and since_push > 0
+                ):
+                    self.logger.debug(
+                        "Cambio de colaborador: push del bloque de @%s.",
+                        last_collaborator.username,
+                    )
+                    self._push(repo, plan.branch, last_collaborator, summary)
+                    last_pushed = max(last_pushed, max(completed))
+                    since_push = 0
+                    state_store.save(plan, completed, last_pushed)
+                    if self.settings.delay_seconds > 0 and position < len(pending) - 1:
+                        self._wait(self.settings.delay_seconds)
 
                 target_identity = Identity(commit.collaborator.name, commit.collaborator.email)
                 if target_identity != current_identity:

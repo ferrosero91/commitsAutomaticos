@@ -329,8 +329,19 @@ class AutocommitWindow(tk.Tk):
                 width=12,
             ).grid(row=row, column=1, sticky="w", pady=4)
 
+        ttk.Label(
+            frame,
+            text=(
+                "Al cambiar de colaborador se fuerza un push con su token; "
+                "nunca se mezclan autores en un mismo push."
+            ),
+            foreground=MUTED,
+            wraplength=700,
+            justify="left",
+        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
         checks = ttk.Frame(frame)
-        checks.grid(row=4, column=0, columnspan=2, sticky="w", pady=(8, 4))
+        checks.grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 4))
         ttk.Checkbutton(
             checks, text="Reanudar desde el estado guardado", variable=self._resume
         ).pack(anchor="w")
@@ -342,7 +353,7 @@ class AutocommitWindow(tk.Tk):
         ).pack(anchor="w")
 
         ai = ttk.LabelFrame(frame, text="Mensajes con IA (OpenCode)", padding=12)
-        ai.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        ai.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         ai.columnconfigure(1, weight=1)
 
         ttk.Checkbutton(

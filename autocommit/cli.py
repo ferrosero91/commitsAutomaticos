@@ -77,7 +77,10 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         metavar="N",
-        help="Commits entre pushes; 0 hace un único push al final.",
+        help=(
+            "Commits entre pushes dentro de un mismo colaborador; al cambiar de "
+            "autor siempre se hace push (0 = solo al final de cada bloque)."
+        ),
     )
     parser.add_argument(
         "--delay",

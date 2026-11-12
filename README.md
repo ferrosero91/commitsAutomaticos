@@ -148,7 +148,7 @@ Ejemplo: `Ada Lovelace:ada-lovelace:ada@example.com:12`.
 | `--branch NAME` | Rama a usar o crear. | Pregunta |
 | `--collaborator SPEC` | Colaborador; se puede repetir. | Pregunta |
 | `--max-files-per-commit N` | Máximo de archivos por commit. | `100` |
-| `--push-every N` | Commits entre pushes; `0` = un único push al final. | `1` |
+| `--push-every N` | Commits entre pushes dentro de un mismo autor; al cambiar de colaborador siempre se hace push. `0` = al final de cada bloque. | `1` |
 | `--delay SEGUNDOS` | Espera entre pushes. | `0` |
 | `--max-file-size-mb MB` | Tamaño máximo por archivo. | `10` |
 | `--allow-secrets` | No bloquear posibles secretos (no recomendado). | Desactivado |
@@ -359,6 +359,37 @@ Notas de la API V2:
 
 > **Nunca incrustes claves de API en el código ni en el repositorio.** Si una
 > clave se filtró, revócala en la consola del proveedor y genera otra.
+
+## Varios colaboradores y autoría
+
+Cada commit se crea con el `user.name` y `user.email` del colaborador, de modo
+que GitHub lo atribuye a ese email. Para que aparezca vinculado a su cuenta, el
+email debe estar **verificado** en su perfil de GitHub.
+
+El push se autentica con el token del autor de su bloque:
+
+- `--push-every 1` (por defecto): cada commit se sube con el token de su autor.
+- `--push-every N`: se agrupan commits del mismo autor y, al cambiar de
+  colaborador, se fuerza un push con el token del bloque anterior.
+- `--push-every 0`: un push al final de cada bloque de colaborador.
+
+Nunca se mezclan autores en un mismo push, así que cada colaborador sube sus
+propios commits. Aun así, **todos necesitan permiso de escritura** en el
+repositorio, porque se empuja a la misma rama.
+
+> El token no decide el autor del commit: la autoría es el email. El token
+> decide quién autentica el push. La herramienta alinea ambos: identidad del
+> autor en el commit y token del mismo colaborador en el push.
+
+Permisos recomendados:
+
+- Ser colaborador con rol **Write** (o pertenecer a un equipo con write).
+- PAT clásico con scope `repo`, o fine-grained con **Contents: Read and write**.
+- Si la organización usa SSO, autorizar el token para la organización.
+
+Si a un colaborador le falta permiso, el push falla con `403`/`404`; el proceso
+se detiene, guarda el estado y puedes continuar con `--resume` después de
+corregir el acceso.
 
 ## Reanudación e idempotencia
 

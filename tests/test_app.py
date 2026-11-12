@@ -4,6 +4,7 @@ import random
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from autocommit.app import Application, RunRequest
 from autocommit.credentials import FileTokenStore, TokenProvider
@@ -36,6 +37,7 @@ class ApplicationTests(TemporaryProjectTestCase):
         store = FileTokenStore(Path(self._tokens_dir.name) / "tokens.json")
         store.set("ada", TOKEN)
         store.set("alan", TOKEN)
+        store.set("carol", TOKEN)
         tokens = TokenProvider(store, prompter, logger=null_logger("tokens"))
         return Application(
             settings,
@@ -99,7 +101,7 @@ class ApplicationTests(TemporaryProjectTestCase):
         self.assertTrue(summary.ok, summary)
         self.assertEqual(summary.commits_created, 4)
         self.assertEqual(summary.files_committed, 4)
-        self.assertEqual(summary.pushes, 1)
+        self.assertEqual(summary.pushes, 2)
         self.assertEqual(summary.failures, 0)
 
         emails = self.git_stdout("log", "--format=%ae", "main").split()
@@ -208,6 +210,59 @@ class ApplicationTests(TemporaryProjectTestCase):
         self.assertEqual(remote_count, "1")
         self.assertEqual(self.git_stdout("config", "--local", "--get", "user.name").strip(), "Prev")
         self.assertFalse(state_store.exists())
+
+    def test_each_collaborator_pushes_with_own_token(self) -> None:
+        repo = self.init_repo()
+        for name in ("a", "b", "c", "d"):
+            self.write(f"src/{name}.py", f"print('{name}')\n")
+        remote = self.init_bare_remote()
+
+        collaborators = (
+            Collaborator("Ada Lovelace", "ada", "ada@example.com", 1),
+            Collaborator("Alan Turing", "alan", "alan@example.com", 2),
+            Collaborator("Grace Hopper", "carol", "carol@example.com", 1),
+        )
+        app = self.make_app(Settings(push_every=3))
+        pushes: list[str] = []
+        original_push = GitRepository.push
+
+        def recording_push(
+            repo_self: GitRepository,
+            branch: str,
+            credentials: object,
+            remote_name: str = "origin",
+            *,
+            timeout: float = 300,
+        ) -> None:
+            pushes.append(credentials.username)  # type: ignore[attr-defined]
+            original_push(
+                repo_self,
+                branch,
+                credentials,
+                remote_name,
+                timeout=timeout,  # type: ignore[arg-type]
+            )
+
+        with mock.patch.object(GitRepository, "push", recording_push):
+            summary = app.run(
+                RunRequest(
+                    repo_path=repo,
+                    remote_url=str(remote),
+                    branch="main",
+                    collaborators=collaborators,
+                    assume_yes=True,
+                    non_interactive=True,
+                )
+            )
+
+        self.assertTrue(summary.ok, summary)
+        self.assertEqual(summary.commits_created, 4)
+        self.assertEqual(pushes, ["ada", "alan", "carol"])
+
+        emails = self.git_stdout("log", "--format=%ae", "main").split()
+        self.assertEqual(emails.count("ada@example.com"), 1)
+        self.assertEqual(emails.count("alan@example.com"), 2)
+        self.assertEqual(emails.count("carol@example.com"), 1)
 
     def test_cancellation_between_commits_keeps_resumable_state(self) -> None:
         repo = self.init_repo()
