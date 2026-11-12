@@ -4,15 +4,27 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
+import random
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 from . import __version__
+from .ai import (
+    DEFAULT_API_KEY_ENV,
+    DEFAULT_BASE_URL,
+    DEFAULT_MODEL,
+    AIConfig,
+    AIMessageFactory,
+    OpenCodeChatClient,
+    api_key_from_env,
+)
 from .app import Application, RunRequest
 from .credentials import TokenProvider, build_default_token_store
-from .errors import AutocommitError
+from .errors import AutocommitError, ValidationError
 from .logging_setup import configure_logging
+from .messages import CommitMessageFactory, ConventionalCommitMessageFactory
 from .settings import Settings
 from .ui import ConsolePrompter, NonInteractivePrompter, Prompter, parse_collaborator
 
@@ -31,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--repo",
         type=Path,
-        help="Carpeta del proyecto. Si se omite, se abre un dialogo o se pregunta.",
+        help="Carpeta del proyecto. Si se omite, se abre un diálogo o se pregunta.",
     )
     parser.add_argument(
         "--remote-url",
@@ -81,6 +93,44 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--ai",
+        action="store_true",
+        help="Genera los mensajes con OpenCode; si falla, usa la heurística.",
+    )
+    parser.add_argument(
+        "--ai-model",
+        default=os.environ.get("AUTOCOMMIT_AI_MODEL", DEFAULT_MODEL),
+        metavar="MODELO",
+        help="Modelo de OpenCode para los mensajes.",
+    )
+    parser.add_argument(
+        "--ai-base-url",
+        default=os.environ.get("AUTOCOMMIT_AI_BASE_URL", DEFAULT_BASE_URL),
+        metavar="URL",
+        help="Base OpenAI-compatible (Go o pay-as-you-go).",
+    )
+    parser.add_argument(
+        "--ai-api-key-env",
+        default=DEFAULT_API_KEY_ENV,
+        metavar="VAR",
+        help="Variable de entorno que contiene la clave de OpenCode.",
+    )
+    parser.add_argument(
+        "--ai-timeout",
+        type=float,
+        default=30.0,
+        metavar="SEGUNDOS",
+        help="Timeout por llamada a la IA.",
+    )
+    parser.add_argument(
+        "--ai-max-calls",
+        type=int,
+        default=200,
+        metavar="N",
+        help="Máximo de mensajes generados por IA; después se usa la heurística.",
+    )
+
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Mostrar el plan sin modificar el repositorio.",
@@ -122,6 +172,37 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_message_factory(
+    args: argparse.Namespace,
+    settings: Settings,
+    logger: logging.Logger,
+) -> CommitMessageFactory | None:
+    """Construye el generador de mensajes con IA si se solicitó."""
+    if not args.ai:
+        return None
+
+    api_key = api_key_from_env(args.ai_api_key_env)
+    if api_key is None:
+        raise ValidationError(
+            f"Falta la variable de entorno {args.ai_api_key_env}. "
+            "Crea una clave en https://opencode.ai/console y expórtala antes de usar --ai."
+        )
+
+    config = AIConfig(
+        api_key=api_key,
+        base_url=args.ai_base_url,
+        model=args.ai_model,
+        timeout=args.ai_timeout,
+        max_calls=args.ai_max_calls,
+    )
+    logger.info("Mensajes con IA: %s en %s", config.model, config.base_url)
+
+    rng = random.Random(settings.seed) if settings.seed is not None else None
+    fallback = ConventionalCommitMessageFactory(rng)
+    client = OpenCodeChatClient(config, logger=logger)
+    return AIMessageFactory(client, fallback, max_calls=config.max_calls, logger=logger)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -143,12 +224,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             seed=args.seed,
         )
         collaborators = tuple(parse_collaborator(spec) for spec in args.collaborator)
+        ai_logger = logging.getLogger("autocommit.ai")
+        message_factory = build_message_factory(args, settings, ai_logger)
         tokens = TokenProvider(
             build_default_token_store(),
             prompter,
             logger=logging.getLogger("autocommit.credentials"),
         )
-        application = Application(settings, prompter, tokens, logger=logger)
+        application = Application(
+            settings,
+            prompter,
+            tokens,
+            logger=logger,
+            message_factory=message_factory,
+        )
         summary = application.run(
             RunRequest(
                 repo_path=args.repo,

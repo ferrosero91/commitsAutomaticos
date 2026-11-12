@@ -24,6 +24,10 @@ class StateError(AutocommitError):
     """El estado persistido no se puede leer o es incompatible."""
 
 
+class AIError(AutocommitError):
+    """El proveedor de mensajes con IA no respondió o devolvió algo inválido."""
+
+
 class GitError(AutocommitError):
     """Un comando de git terminó con un código de salida distinto de cero."""
 
