@@ -13,6 +13,6 @@ El paquete está organizado por responsabilidades (ver README):
     state          -> persistencia para reanudar ejecuciones
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 __all__ = ["__version__"]
