@@ -23,6 +23,7 @@ from .ai import (
 )
 from .app import Application, RunRequest
 from .credentials import TokenProvider, build_default_token_store
+from .env import load_env_file
 from .errors import AutocommitError
 from .logging_setup import configure_logging
 from .messages import CommitMessageFactory, ConventionalCommitMessageFactory
@@ -100,15 +101,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--ai-model",
-        default=os.environ.get("AUTOCOMMIT_AI_MODEL", DEFAULT_MODEL),
+        default=None,
         metavar="MODELO",
-        help="Modelo de OpenCode para los mensajes.",
+        help=(
+            "Modelo de OpenCode para los mensajes "
+            f"(env AUTOCOMMIT_AI_MODEL; por defecto {DEFAULT_MODEL})."
+        ),
     )
     parser.add_argument(
         "--ai-base-url",
-        default=os.environ.get("AUTOCOMMIT_AI_BASE_URL", DEFAULT_BASE_URL),
+        default=None,
         metavar="URL",
-        help="Base OpenAI-compatible (Go o pay-as-you-go).",
+        help=(
+            "Base OpenAI-compatible (Go o pay-as-you-go) "
+            f"(env AUTOCOMMIT_AI_BASE_URL; por defecto {DEFAULT_BASE_URL})."
+        ),
     )
     parser.add_argument(
         "--ai-api-key-env",
@@ -175,6 +182,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="No solicitar datos por consola; falla si faltan argumentos.",
     )
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        help="Carga variables CLAVE=VALOR antes de ejecutar (p. ej. OPENCODE_API_KEY).",
+    )
     parser.add_argument("--log-file", type=Path, help="Archivo donde guardar el log.")
     parser.add_argument(
         "--log-level",
@@ -183,6 +195,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Nivel de detalle en consola.",
     )
     return parser
+
+
+def resolve_ai_config(
+    args: argparse.Namespace,
+    logger: logging.Logger,
+    *,
+    prompter: Prompter | None = None,
+) -> AIConfig:
+    """Resuelve clave, modelo y URL de la IA a partir de argumentos y entorno."""
+    api_key = resolve_api_key(
+        explicit=args.ai_api_key,
+        env_var=args.ai_api_key_env,
+        key_file=args.ai_api_key_file,
+        prompter=prompter,
+        logger=logger,
+    )
+    model = args.ai_model or os.environ.get("AUTOCOMMIT_AI_MODEL") or DEFAULT_MODEL
+    base_url = args.ai_base_url or os.environ.get("AUTOCOMMIT_AI_BASE_URL") or DEFAULT_BASE_URL
+    return AIConfig(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        timeout=args.ai_timeout,
+        max_calls=args.ai_max_calls,
+    )
 
 
 def build_message_factory(
@@ -196,21 +233,7 @@ def build_message_factory(
     if not args.ai:
         return None
 
-    api_key = resolve_api_key(
-        explicit=args.ai_api_key,
-        env_var=args.ai_api_key_env,
-        key_file=args.ai_api_key_file,
-        prompter=prompter,
-        logger=logger,
-    )
-
-    config = AIConfig(
-        api_key=api_key,
-        base_url=args.ai_base_url,
-        model=args.ai_model,
-        timeout=args.ai_timeout,
-        max_calls=args.ai_max_calls,
-    )
+    config = resolve_ai_config(args, logger, prompter=prompter)
     logger.info("Mensajes con IA: %s en %s", config.model, config.base_url)
 
     rng = random.Random(settings.seed) if settings.seed is not None else None
@@ -223,6 +246,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     logger = configure_logging(args.log_level, args.log_file)
+
+    if args.env_file:
+        applied = load_env_file(args.env_file)
+        logger.info(
+            "Variables cargadas desde %s: %s",
+            args.env_file,
+            ", ".join(sorted(applied)) or "ninguna nueva",
+        )
 
     interactive = not args.non_interactive and sys.stdin.isatty()
     prompter: Prompter = ConsolePrompter() if interactive else NonInteractivePrompter()

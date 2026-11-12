@@ -19,8 +19,9 @@ from autocommit.ai import (
     resolve_api_key,
     sanitize_message,
 )
-from autocommit.cli import build_message_factory, build_parser
+from autocommit.cli import build_message_factory, build_parser, resolve_ai_config
 from autocommit.credentials import read_secret_file, write_secret_file
+from autocommit.env import load_env_file
 from autocommit.errors import AIError, ValidationError
 from autocommit.settings import Settings
 from tests.support import ScriptedPrompter, TemporaryProjectTestCase, null_logger
@@ -423,6 +424,45 @@ class CliWiringTests(TemporaryProjectTestCase):
         with mock.patch.dict(os.environ, {"MI_CLAVE": "oc_sk_test"}, clear=True):
             factory = build_message_factory(args, Settings(seed=1), null_logger("cli"))
         self.assertIsInstance(factory, AIMessageFactory)
+
+    def test_env_file_supplies_key_and_options(self) -> None:
+        env_path = self.write(
+            "vars.env",
+            "OPENCODE_API_KEY=oc_sk_desde_archivo\n"
+            "AUTOCOMMIT_AI_MODEL=glm-5.3-flash\n"
+            "AUTOCOMMIT_AI_BASE_URL=https://example.test/openai/v1\n",
+        )
+        args = self.parse("--env-file", str(env_path))
+        with mock.patch.dict(os.environ, {}, clear=True):
+            applied = load_env_file(env_path)
+            config = resolve_ai_config(args, null_logger("cli"))
+        self.assertIn("OPENCODE_API_KEY", applied)
+        self.assertEqual(config.api_key, "oc_sk_desde_archivo")
+        self.assertEqual(config.model, "glm-5.3-flash")
+        self.assertEqual(config.base_url, "https://example.test/openai/v1")
+
+    def test_flags_win_over_environment(self) -> None:
+        args = self.parse(
+            "--ai-api-key",
+            "oc_sk_flag",
+            "--ai-model",
+            "kimi-k2.7-code",
+            "--ai-base-url",
+            "https://flag.test/v1",
+        )
+        with mock.patch.dict(
+            os.environ,
+            {
+                "OPENCODE_API_KEY": "oc_sk_env",
+                "AUTOCOMMIT_AI_MODEL": "glm-5.3-flash",
+                "AUTOCOMMIT_AI_BASE_URL": "https://env.test/v1",
+            },
+            clear=True,
+        ):
+            config = resolve_ai_config(args, null_logger("cli"))
+        self.assertEqual(config.api_key, "oc_sk_flag")
+        self.assertEqual(config.model, "kimi-k2.7-code")
+        self.assertEqual(config.base_url, "https://flag.test/v1")
 
 
 if __name__ == "__main__":

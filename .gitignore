@@ -24,3 +24,8 @@ Thumbs.db
 # Editores
 .idea/
 .vscode/
+
+# Secretos locales
+.env
+.env.*
+!.env.example
