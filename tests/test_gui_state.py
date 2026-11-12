@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import ast
 import os
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from autocommit.ai import default_key_file
@@ -283,6 +285,32 @@ class GuiStateTests(TemporaryProjectTestCase):
             state, state.to_settings(), null_logger("gui"), persist=False
         )
         self.assertIsNotNone(factory)
+
+
+class GuiSourceTests(unittest.TestCase):
+    def test_does_not_shadow_tk_reserved_attributes(self) -> None:
+        """Tkinter usa self._name/self._w; sobrescribirlos rompe destroy()."""
+        source_path = Path(__file__).resolve().parents[1] / "autocommit" / "gui.py"
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        reserved = {
+            "_name",
+            "_w",
+            "_root",
+            "_master",
+            "_tclCommands",
+            "_last_child_ids",
+        }
+        offenders: set[str] = set()
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "self"
+                and node.attr in reserved
+                and isinstance(node.ctx, ast.Store)
+            ):
+                offenders.add(node.attr)
+        self.assertEqual(offenders, set(), f"Atributos reservados de Tkinter: {sorted(offenders)}")
 
 
 if __name__ == "__main__":

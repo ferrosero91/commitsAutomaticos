@@ -73,21 +73,21 @@ class CollaboratorDialog(tk.Toplevel):
         self.transient(parent)
         self.result: CollaboratorDraft | None = None
 
-        self._name = tk.StringVar(value=draft.name if draft else "")
-        self._username = tk.StringVar(value=draft.username if draft else "")
-        self._email = tk.StringVar(value=draft.email if draft else "")
-        self._commits = tk.StringVar(value=str(draft.commits if draft else 1))
-        self._token = tk.StringVar(value=draft.token if draft else "")
-        self._remember = tk.BooleanVar(value=draft.remember if draft else True)
+        self._name_var = tk.StringVar(value=draft.name if draft else "")
+        self._username_var = tk.StringVar(value=draft.username if draft else "")
+        self._email_var = tk.StringVar(value=draft.email if draft else "")
+        self._commits_var = tk.StringVar(value=str(draft.commits if draft else 1))
+        self._token_var = tk.StringVar(value=draft.token if draft else "")
+        self._remember_var = tk.BooleanVar(value=draft.remember if draft else True)
 
         frame = ttk.Frame(self, padding=16)
         frame.pack(fill="both", expand=True)
 
         first_entry: ttk.Entry | None = None
         fields = (
-            ("Nombre completo", self._name),
-            ("Usuario de GitHub", self._username),
-            ("Email de GitHub", self._email),
+            ("Nombre completo", self._name_var),
+            ("Usuario de GitHub", self._username_var),
+            ("Email de GitHub", self._email_var),
         )
         for row, (label, variable) in enumerate(fields):
             ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", pady=4)
@@ -97,19 +97,19 @@ class CollaboratorDialog(tk.Toplevel):
                 first_entry = entry
 
         ttk.Label(frame, text="Commits").grid(row=3, column=0, sticky="w", pady=4)
-        ttk.Spinbox(frame, from_=1, to=10000, textvariable=self._commits, width=8).grid(
+        ttk.Spinbox(frame, from_=1, to=10000, textvariable=self._commits_var, width=8).grid(
             row=3, column=1, sticky="w", pady=4
         )
 
         ttk.Label(frame, text="Token").grid(row=4, column=0, sticky="w", pady=4)
-        ttk.Entry(frame, textvariable=self._token, show="•", width=40).grid(
+        ttk.Entry(frame, textvariable=self._token_var, show="•", width=40).grid(
             row=4, column=1, sticky="ew", pady=4
         )
 
         ttk.Checkbutton(
             frame,
             text="Guardar el token en el almacén seguro (0600)",
-            variable=self._remember,
+            variable=self._remember_var,
         ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         ttk.Label(
@@ -134,10 +134,10 @@ class CollaboratorDialog(tk.Toplevel):
     def _save(self) -> None:
         try:
             collaborator = Collaborator(
-                name=self._name.get(),
-                username=self._username.get(),
-                email=self._email.get(),
-                commits=int(self._commits.get()),
+                name=self._name_var.get(),
+                username=self._username_var.get(),
+                email=self._email_var.get(),
+                commits=int(self._commits_var.get()),
             )
         except (ValueError, ValidationError) as exc:
             messagebox.showerror("Datos inválidos", str(exc), parent=self)
@@ -148,8 +148,8 @@ class CollaboratorDialog(tk.Toplevel):
             username=collaborator.username,
             email=collaborator.email,
             commits=collaborator.commits,
-            token=self._token.get().strip(),
-            remember=self._remember.get(),
+            token=self._token_var.get().strip(),
+            remember=self._remember_var.get(),
         )
         self.destroy()
 
