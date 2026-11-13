@@ -392,6 +392,26 @@ class ApplicationTests(TemporaryProjectTestCase):
         app._delay(5)
         self.assertLess(time.monotonic() - started, 1.0)
 
+    def test_dry_run_on_uninitialized_folder(self) -> None:
+        self.write("a.py", "print('a')\n")
+        self.write("b.py", "print('b')\n")
+        app = self.make_app(Settings(dry_run=True))
+
+        summary = app.run(
+            RunRequest(
+                repo_path=self.tmp,
+                branch="main",
+                collaborators=(Collaborator("Ada", "ada", "ada@example.com", 2),),
+                assume_yes=True,
+                non_interactive=True,
+            )
+        )
+
+        self.assertTrue(summary.ok, summary)
+        self.assertEqual(summary.planned_files, 2)
+        self.assertEqual(summary.commits_created, 0)
+        self.assertFalse((self.tmp / ".git").exists())
+
     def test_dry_run_without_remote(self) -> None:
         repo = self.init_repo()
         self.write("a.py", "print('a')\n")

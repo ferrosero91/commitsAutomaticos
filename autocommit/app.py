@@ -166,7 +166,7 @@ class Application:
         if not self.settings.dry_run:
             repo.ensure_branch(plan.branch)
 
-        if resumed is None and not repo.uncommitted_changes():
+        if resumed is None and repo.is_initialized() and not repo.uncommitted_changes():
             self.logger.warning(
                 "El árbol de trabajo está limpio: no hay archivos modificados ni sin "
                 "seguimiento, así que los commits se omitirán. Usa una copia sin .git, "
