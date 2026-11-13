@@ -627,6 +627,12 @@ class Application:
             summary.pushes,
             summary.failures,
         )
+        if summary.commits_created == 0 and summary.commits_skipped:
+            self.logger.warning(
+                "No se creó ningún commit: los archivos del plan ya estaban "
+                "versionados y sin cambios. Si esperabas un historial nuevo, usa "
+                "una copia sin .git o modifica archivos."
+            )
         if summary.ok and summary.commits_created:
             self.logger.info("Proceso completado correctamente.")
 

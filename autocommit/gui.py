@@ -617,8 +617,18 @@ class AutocommitWindow(tk.Tk):
             f"Errores: {summary.failures}"
         )
         if summary.ok:
-            self._append("Proceso completado.")
-            messagebox.showinfo("Listo", detail, parent=self)
+            if summary.commits_created == 0 and summary.commits_skipped:
+                self._append("Sin cambios: no se creó ningún commit.")
+                messagebox.showwarning(
+                    "Sin cambios",
+                    "No se creó ningún commit: los archivos del plan ya estaban "
+                    "versionados y sin cambios.\n\nSi esperabas un historial nuevo, "
+                    "usa una copia sin .git o modifica archivos.",
+                    parent=self,
+                )
+            else:
+                self._append("Proceso completado.")
+                messagebox.showinfo("Listo", detail, parent=self)
         else:
             self._append("Proceso completado con errores.")
             messagebox.showwarning("Con errores", detail, parent=self)
