@@ -286,6 +286,11 @@ la plantilla:
   [Conventional Commits](https://www.conventionalcommits.org/):
   `tipo(scope): descripción`, con una heurística basada en rutas y extensiones.
 - Los mensajes no analizan el diff: describen el grupo de archivos.
+- Si un archivo desaparece entre el escaneo y el commit, se omite con una
+  advertencia y el resto del plan continúa.
+- Si el árbol de trabajo está limpio (todo versionado y sin cambios), no hay
+  nada que commitear: los commits se omitirán. Para probar el flujo, usa una
+  copia del proyecto sin `.git`, una rama nueva o modifica algún archivo.
 
 ## Mensajes con IA (OpenCode)
 

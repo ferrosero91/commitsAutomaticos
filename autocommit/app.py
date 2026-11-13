@@ -166,6 +166,13 @@ class Application:
         if not self.settings.dry_run:
             repo.ensure_branch(plan.branch)
 
+        if resumed is None and not repo.uncommitted_changes():
+            self.logger.warning(
+                "El árbol de trabajo está limpio: no hay archivos modificados ni sin "
+                "seguimiento, así que los commits se omitirán. Usa una copia sin .git, "
+                "una rama nueva o modifica archivos antes de ejecutar."
+            )
+
         summary.planned_commits = plan.total_commits
         summary.planned_files = plan.total_files
         self._log_plan(plan, completed)
@@ -489,7 +496,17 @@ class Application:
                     current_identity = target_identity
 
                 try:
-                    repo.stage(commit.files)
+                    staged = repo.stage(commit.files)
+                    if not staged:
+                        self.logger.warning(
+                            "Los archivos de %r ya no existen; se omite el commit.",
+                            commit.message,
+                        )
+                        summary.commits_skipped += 1
+                        completed.add(commit.index)
+                        state_store.save(plan, completed, last_pushed)
+                        continue
+
                     if not repo.has_staged_changes():
                         self.logger.warning(
                             "Sin cambios en disco para %r (%d archivo(s)); se omite.",
@@ -512,7 +529,7 @@ class Application:
                     continue
 
                 summary.commits_created += 1
-                summary.files_committed += len(commit.files)
+                summary.files_committed += len(staged)
                 since_push += 1
                 last_collaborator = commit.collaborator
                 completed.add(commit.index)
@@ -522,7 +539,7 @@ class Application:
                     "%s %s | %d archivo(s) | @%s",
                     sha[:8],
                     commit.message,
-                    len(commit.files),
+                    len(staged),
                     commit.collaborator.username,
                 )
 

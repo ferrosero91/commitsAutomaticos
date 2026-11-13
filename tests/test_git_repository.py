@@ -105,6 +105,40 @@ class GitRepositoryTests(TemporaryProjectTestCase):
         with self.assertRaises(ValidationError):
             self.repo.stage([])
 
+    def test_stage_returns_staged_files_and_skips_missing(self) -> None:
+        self.write("a.py", "print('a')\n")
+        staged = self.repo.stage(["a.py", "desaparecido.py"])
+        self.assertEqual(staged, ["a.py"])
+
+    def test_stage_returns_empty_when_everything_is_missing(self) -> None:
+        self.assertEqual(self.repo.stage(["no1.py", "no2.py"]), [])
+
+    def test_stage_propagates_pathspec_errors(self) -> None:
+        self.write("a.py", "print('a')\n")
+        error = GitError(
+            "fatal: pathspec 'a.py' did not match any files",
+            stderr="fatal: pathspec 'a.py' did not match any files",
+        )
+        runner = FakeRunner(error)
+        repo = GitRepository(self.tmp, runner=runner, logger=null_logger("git"))
+        with self.assertRaises(GitError):
+            repo.stage(["a.py"])
+        self.assertEqual(len(runner.calls), 1)
+
+    def test_stage_falls_back_for_old_git_versions(self) -> None:
+        self.write("a.py", "print('a')\n")
+        runner = FakeRunner(
+            GitError(
+                "fallo",
+                stderr="error: unknown option `pathspec-from-file'",
+            ),
+            None,
+        )
+        repo = GitRepository(self.tmp, runner=runner, logger=null_logger("git"))
+        self.assertEqual(repo.stage(["a.py"]), ["a.py"])
+        self.assertEqual(len(runner.calls), 2)
+        self.assertEqual(runner.calls[1][:2], ("add", "--"))
+
     def test_push_does_not_leak_token_into_config(self) -> None:
         self.repo.ensure_branch("main")
         self.repo.set_identity(Identity("Test", "test@example.com"))
@@ -159,6 +193,21 @@ class GitRepositoryTests(TemporaryProjectTestCase):
         self.assertIn("main", clone.remote_branches("origin"))
         clone.ensure_branch("main")
         self.assertEqual(clone.current_branch(), "main")
+
+
+class FakeRunner:
+    """Runner mínimo para probar rutas de error sin ejecutar git."""
+
+    def __init__(self, *results: object) -> None:
+        self.results = list(results)
+        self.calls: list[tuple] = []
+
+    def git(self, *args: str, **kwargs: object) -> object:
+        self.calls.append(args)
+        result = self.results.pop(0)
+        if isinstance(result, BaseException):
+            raise result
+        return result
 
 
 class GitErrorTests(unittest.TestCase):

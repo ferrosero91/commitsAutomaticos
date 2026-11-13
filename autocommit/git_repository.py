@@ -224,18 +224,56 @@ class GitRepository:
 
     # ----------------------------------------------------------------- staging
 
-    def stage(self, files: Sequence[str]) -> None:
+    def stage(self, files: Sequence[str]) -> list[str]:
+        """Prepara los archivos que aún existen y devuelve la lista usada.
+
+        Entre el escaneo y el commit pueden desaparecer archivos (builds,
+        editores, procesos externos). Omitirlos evita abortar toda la
+        ejecución por un pathspec que ya no existe.
+        """
         if not files:
             raise ValidationError("No hay archivos que preparar para el commit.")
 
-        payload = "\0".join(files) + "\0"
+        existing: list[str] = []
+        missing: list[str] = []
+        for relative in files:
+            if (self.root / relative).exists():
+                existing.append(relative)
+            else:
+                missing.append(relative)
+
+        if missing:
+            preview = ", ".join(missing[:5])
+            if len(missing) > 5:
+                preview += f" y {len(missing) - 5} más"
+            self._logger.warning(
+                "Se omiten %d archivo(s) que ya no existen: %s",
+                len(missing),
+                preview,
+            )
+
+        if not existing:
+            return []
+
+        payload = "\0".join(existing) + "\0"
         try:
             self._runner.git("add", "--pathspec-from-file=-", "--pathspec-file-nul", stdin=payload)
-        except GitError:
+        except GitError as exc:
+            if not self._pathspec_option_unsupported(exc):
+                raise
             # Compatibilidad con git < 2.25.
-            for start in range(0, len(files), _CHUNK_SIZE):
-                chunk = files[start : start + _CHUNK_SIZE]
+            for start in range(0, len(existing), _CHUNK_SIZE):
+                chunk = existing[start : start + _CHUNK_SIZE]
                 self._runner.git("add", "--", *chunk)
+
+        return existing
+
+    @staticmethod
+    def _pathspec_option_unsupported(error: GitError) -> bool:
+        message = f"{error.stderr} {error}".lower()
+        return "pathspec-from-file" in message and (
+            "unknown option" in message or "unrecognized option" in message
+        )
 
     def has_staged_changes(self) -> bool:
         result = self._runner.git("diff", "--cached", "--quiet", check=False)

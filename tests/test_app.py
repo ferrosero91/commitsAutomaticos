@@ -339,6 +339,41 @@ class ApplicationTests(TemporaryProjectTestCase):
         self.assertNotEqual(self.git("rev-parse", "--verify", "HEAD").returncode, 0)
         self.assertFalse((repo / ".git" / "autocommit" / "state.json").exists())
 
+    def test_missing_file_is_skipped_without_aborting(self) -> None:
+        repo = self.init_repo()
+        self.write("a.py", "print('a')\n")
+        self.write("b.py", "print('b')\n")
+        remote = self.init_bare_remote()
+        deleted = repo / "a.py"
+
+        class DeletingFactory:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def create(self, files: list[str]) -> str:
+                self.calls += 1
+                if self.calls == 1:
+                    deleted.unlink()
+                return f"chore: grupo {self.calls}"
+
+        app = self.make_app(Settings(push_every=0), message_factory=DeletingFactory())
+        summary = app.run(
+            RunRequest(
+                repo_path=repo,
+                remote_url=str(remote),
+                branch="main",
+                collaborators=(Collaborator("Ada Lovelace", "ada", "ada@example.com", 2),),
+                assume_yes=True,
+                non_interactive=True,
+            )
+        )
+
+        self.assertTrue(summary.ok, summary)
+        self.assertEqual(summary.commits_created, 1)
+        self.assertEqual(summary.commits_skipped, 1)
+        self.assertEqual(summary.files_committed, 1)
+        self.assertEqual(self.git_stdout("rev-list", "--count", "main").strip(), "1")
+
     def test_delay_reacts_to_cancellation(self) -> None:
         event = threading.Event()
         app = Application(
