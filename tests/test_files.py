@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 from autocommit.files import FileDiscovery, GitIgnoreFilter
 from autocommit.runner import CommandRunner
@@ -81,6 +86,38 @@ class FileDiscoveryTests(TemporaryProjectTestCase):
         files = self.discover()
         self.assertNotIn("vendor/library/code.py", files)
         self.assertIn("vendor/keep.py", files)
+
+    def test_excludes_tracked_files_that_match_gitignore(self) -> None:
+        self.write(
+            ".gitignore",
+            "secreto.py\n",
+        )
+        self.write("secreto.py", "API_KEY = 'no debe subirse'\n")
+        result = self.git("add", "-f", "secreto.py")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        files = self.discover()
+        self.assertNotIn("secreto.py", files)
+
+    def test_respects_git_info_exclude(self) -> None:
+        self.write(".git/info/exclude", "*.local\n")
+        self.write("config.local", "x\n")
+        files = self.discover()
+        self.assertNotIn("config.local", files)
+
+    def test_respects_global_excludes_file(self) -> None:
+        outside = Path(tempfile.mkdtemp(prefix="autocommit-global-ignore-"))
+        self.addCleanup(shutil.rmtree, outside, True)
+        excludes = outside / "global-ignore"
+        excludes.write_text("*.global\n", encoding="utf-8")
+        config = outside / "gitconfig"
+        config.write_text(f"[core]\n\texcludesFile = {excludes}\n", encoding="utf-8")
+        self.write("archivo.global", "x\n")
+
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(config)}, clear=False):
+            files = self.discover()
+
+        self.assertNotIn("archivo.global", files)
 
     def test_skips_bare_repositories(self) -> None:
         self.write("mirror.git/HEAD", "ref: refs/heads/main\n")

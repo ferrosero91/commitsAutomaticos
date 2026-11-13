@@ -64,7 +64,11 @@ class GitIgnoreFilter:
             return set()
 
         payload = "\0".join(paths) + "\0"
-        result = self._runner.git("check-ignore", "--stdin", "-z", stdin=payload, check=False)
+        # --no-index aplica las reglas también a archivos ya rastreados: un
+        # archivo que coincide con .gitignore nunca debe entrar en el plan.
+        result = self._runner.git(
+            "check-ignore", "--no-index", "--stdin", "-z", stdin=payload, check=False
+        )
         if result.returncode not in (0, 1):
             raise GitError(
                 "No se pudo evaluar .gitignore con 'git check-ignore'.",

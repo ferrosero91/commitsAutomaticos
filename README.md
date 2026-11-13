@@ -228,14 +228,41 @@ Antes de planificar, cada archivo pasa por un validador que rechaza:
 
 Los archivos rechazados se muestran con su motivo y se excluyen del plan.
 `--allow-secrets` desactiva las dos primeras comprobaciones, pero mantiene el
-límite de tamaño. Úsalo solo tras revisar el contenido.
+límite de tamaño y **no** desactiva `.gitignore`. Úsalo solo tras revisar el
+contenido.
+
+### Qué no se sube
+
+Antes de crear el plan se aplican varias capas independientes:
+
+1. **`.gitignore` real:** `git check-ignore --no-index` respeta patrones,
+   negaciones y `.gitignore` anidados, además de `.git/info/exclude` y el
+   `core.excludesFile` global.
+2. **Archivos ya rastreados:** aunque un archivo esté en el índice, si coincide
+   con una regla de ignore se excluye igualmente. Así una clave que se añadió
+   con `git add -f` no vuelve a subirse.
+3. **Directorios y nombres por defecto:** `.git`, repositorios anidados,
+   submódulos, `node_modules`, `.venv`, `build`, `dist`, `target`,
+   `__pycache__`, etc.
+4. **Sufijos temporales:** `.log`, `.tmp`, `.bak`, `.pyc`, `.swp`, etc.
+5. **Validador de seguridad:** `.env`, claves privadas, credenciales, tokens
+   conocidos y archivos que superen el tamaño máximo.
+
+`.gitignore` sí se versiona (contiene patrones, no secretos); `.git/info/exclude`
+vive dentro de `.git` y nunca se sube. Los archivos de ignore globales están
+fuera del proyecto.
+
+> **Importante:** ignorar un archivo no borra lo que ya está en el historial.
+> Si una clave se subió antes, hay que **revocarla/rotarla** y limpiar el
+> historial con `git filter-repo` (o BFG) antes de volver a publicar.
 
 ---
 
 ## Cómo se construye el plan
 
 - Se descubren los archivos respetando `.gitignore` mediante
-  `git check-ignore` (patrones, negaciones y archivos anidados reales).
+  `git check-ignore --no-index` (patrones, negaciones, archivos anidados,
+  exclude global y archivos ya rastreados).
 - Se omiten directorios de build, dependencias, entornos virtuales, repositorios
   anidados y submódulos.
 - Los archivos se reparten en bloques contiguos y equilibrados.
