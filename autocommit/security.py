@@ -22,6 +22,10 @@ MAX_FINDINGS_PER_FILE = 5
 
 DOC_SUFFIXES = frozenset({".md", ".rst", ".txt", ".adoc"})
 
+# Plantillas de entorno: no llevan secretos reales y su contenido se escanea
+# igualmente. Solo se permiten estos nombres exactos.
+ENV_TEMPLATE_NAMES = frozenset({".env.example", ".env.sample", ".env.template", ".env.dist"})
+
 SENSITIVE_NAME_PATTERNS = (
     ".env",
     ".env.*",
@@ -242,6 +246,8 @@ class ValidationReport:
 
 
 def _matches_sensitive_name(name: str) -> bool:
+    if name.lower() in ENV_TEMPLATE_NAMES:
+        return False
     return any(fnmatch.fnmatch(name, pattern) for pattern in SENSITIVE_NAME_PATTERNS)
 
 

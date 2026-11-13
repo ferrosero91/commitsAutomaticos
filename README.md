@@ -226,6 +226,11 @@ Antes de planificar, cada archivo pasa por un validador que rechaza:
   Stripe, claves privadas, JWT y asignaciones genéricas de credenciales);
 - archivos que superen `--max-file-size-mb`.
 
+Se permiten las **plantillas** `.env.example`, `.env.sample`, `.env.template` y
+`.env.dist`: no se bloquean por nombre, pero su contenido se escanea igual. Si
+una plantilla contiene un token real, se rechaza. Las variantes como `.env`,
+`.env.local`, `.env.test` o `.env.production` siguen bloqueadas.
+
 Los archivos rechazados se muestran con su motivo y se excluyen del plan.
 `--allow-secrets` desactiva las dos primeras comprobaciones, pero mantiene el
 límite de tamaño y **no** desactiva `.gitignore`. Úsalo solo tras revisar el
@@ -246,11 +251,20 @@ Antes de crear el plan se aplican varias capas independientes:
    `__pycache__`, etc.
 4. **Sufijos temporales:** `.log`, `.tmp`, `.bak`, `.pyc`, `.swp`, etc.
 5. **Validador de seguridad:** `.env`, claves privadas, credenciales, tokens
-   conocidos y archivos que superen el tamaño máximo.
+   conocidos y archivos que superen el tamaño máximo. Las plantillas
+   `.env.example`, `.env.sample`, `.env.template` y `.env.dist` se permiten,
+   pero se escanean igual.
 
 `.gitignore` sí se versiona (contiene patrones, no secretos); `.git/info/exclude`
 vive dentro de `.git` y nunca se sube. Los archivos de ignore globales están
-fuera del proyecto.
+fuera del proyecto. Si tu `.gitignore` ignora `.env.*`, añade una excepción para
+la plantilla:
+
+```gitignore
+.env
+.env.*
+!.env.example
+```
 
 > **Importante:** ignorar un archivo no borra lo que ya está en el historial.
 > Si una clave se subió antes, hay que **revocarla/rotarla** y limpiar el

@@ -70,6 +70,34 @@ class FileValidatorTests(TemporaryProjectTestCase):
                 self.assertEqual(report.accepted, ())
                 self.assertIn("sensible", report.rejected[0].reason)
 
+    def test_accepts_env_templates_with_placeholders(self) -> None:
+        for name in (".env.example", ".env.sample", ".env.template", ".env.dist"):
+            with self.subTest(name=name):
+                self.write(
+                    name,
+                    "OPENCODE_API_KEY=\nAPI_KEY=your-api-key-here\n",
+                )
+                validator = FileValidator(self.tmp, max_size_bytes=1024)
+                report = validator.validate([name])
+                self.assertEqual(report.accepted, (name,))
+                self.assertEqual(report.rejected, ())
+
+    def test_rejects_env_templates_with_real_secrets(self) -> None:
+        self.write(".env.template", f"OPENCODE_API_KEY={GITHUB_TOKEN}\n")
+        validator = FileValidator(self.tmp, max_size_bytes=1024)
+        report = validator.validate([".env.template"])
+        self.assertEqual(report.accepted, ())
+        self.assertIn("secreto", report.rejected[0].reason)
+
+    def test_still_rejects_non_template_env_files(self) -> None:
+        for name in (".env", ".env.local", ".env.production", ".env.test"):
+            with self.subTest(name=name):
+                self.write(name, "OPENCODE_API_KEY=\n")
+                validator = FileValidator(self.tmp, max_size_bytes=1024)
+                report = validator.validate([name])
+                self.assertEqual(report.accepted, ())
+                self.assertIn("sensible", report.rejected[0].reason)
+
     def test_rejects_files_with_secrets(self) -> None:
         self.write("config.py", f'TOKEN = "{GITHUB_TOKEN}"\n')
         validator = FileValidator(self.tmp, max_size_bytes=1024)
