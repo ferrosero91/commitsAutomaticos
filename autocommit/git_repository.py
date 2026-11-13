@@ -16,6 +16,7 @@ import tempfile
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from .errors import GitError, ValidationError
@@ -293,10 +294,18 @@ class GitRepository:
 
     # ----------------------------------------------------------------- commits
 
-    def commit(self, message: str) -> str:
+    def commit(self, message: str, *, date: datetime | None = None) -> str:
         if not message.strip():
             raise ValidationError("El mensaje del commit no puede estar vacio.")
-        self._runner.git("commit", "-m", message)
+        env = None
+        if date is not None:
+            stamp = date.isoformat()
+            env = {
+                **os.environ,
+                "GIT_AUTHOR_DATE": stamp,
+                "GIT_COMMITTER_DATE": stamp,
+            }
+        self._runner.git("commit", "-m", message, env=env)
         sha = self._runner.git("rev-parse", "HEAD")
         return sha.stdout.strip()
 

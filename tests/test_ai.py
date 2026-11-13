@@ -14,6 +14,7 @@ from autocommit.ai import (
     DEFAULT_MODEL,
     AIConfig,
     AIMessageFactory,
+    FileSnippetProvider,
     OpenCodeChatClient,
     build_user_prompt,
     resolve_api_key,
@@ -25,6 +26,8 @@ from autocommit.env import load_env_file
 from autocommit.errors import AIError, ValidationError
 from autocommit.settings import Settings
 from tests.support import ScriptedPrompter, TemporaryProjectTestCase, null_logger
+
+GITHUB_TOKEN = "ghp_" + "a" * 36
 
 
 class FakeResponse:
@@ -123,7 +126,48 @@ class SanitizeMessageTests(unittest.TestCase):
                 self.assertIsNotNone(sanitize_message(f"{kind}: cambia algo"))
 
 
+class FileSnippetProviderTests(TemporaryProjectTestCase):
+    def test_includes_file_content(self) -> None:
+        self.write("src/a.py", "def hola():\n    return 1\n")
+        context = FileSnippetProvider(self.tmp).build(["src/a.py"])
+        self.assertIn("--- src/a.py ---", context)
+        self.assertIn("def hola", context)
+
+    def test_skips_binary_files(self) -> None:
+        path = self.tmp / "blob.bin"
+        path.write_bytes(b"\x00\x01contenido")
+        self.assertEqual(FileSnippetProvider(self.tmp).build(["blob.bin"]), "")
+
+    def test_redacts_tokens(self) -> None:
+        self.write("config.py", f'TOKEN = "{GITHUB_TOKEN}"\n')
+        context = FileSnippetProvider(self.tmp).build(["config.py"])
+        self.assertNotIn(GITHUB_TOKEN, context)
+        self.assertIn("***", context)
+
+    def test_truncates_long_files(self) -> None:
+        self.write("long.txt", "\n".join(f"linea {i}" for i in range(200)))
+        context = FileSnippetProvider(self.tmp, max_lines=5).build(["long.txt"])
+        self.assertNotIn("linea 10", context)
+        self.assertIn("linea 4", context)
+
+    def test_limits_total_size(self) -> None:
+        for index in range(10):
+            self.write(f"file_{index}.txt", "x" * 100)
+        context = FileSnippetProvider(self.tmp, max_total_chars=250).build(
+            [f"file_{index}.txt" for index in range(10)]
+        )
+        self.assertLessEqual(len(context), 300)
+
+    def test_missing_file_is_ignored(self) -> None:
+        self.assertEqual(FileSnippetProvider(self.tmp).build(["no-existe"]), "")
+
+
 class PromptTests(unittest.TestCase):
+    def test_includes_context_when_present(self) -> None:
+        prompt = build_user_prompt(["a.py"], "--- a.py ---\ncontenido")
+        self.assertIn("Extracto del contenido", prompt)
+        self.assertIn("contenido", prompt)
+
     def test_lists_files(self) -> None:
         prompt = build_user_prompt(["src/a.py", "tests/test_a.py"])
         self.assertIn("- src/a.py", prompt)
@@ -309,6 +353,26 @@ class AIMessageFactoryTests(unittest.TestCase):
     def test_rejects_empty_file_list(self) -> None:
         with self.assertRaises(ValueError):
             AIMessageFactory(StubClient("feat: x"), StubFallback()).create([])
+
+    def test_passes_context_to_client(self) -> None:
+        class CapturingClient:
+            def __init__(self) -> None:
+                self.prompts: list[str] = []
+
+            def complete(self, system: str, user: str) -> str:
+                self.prompts.append(user)
+                return "feat: mensaje"
+
+        client = CapturingClient()
+        factory = AIMessageFactory(
+            client,
+            StubFallback(),
+            logger=null_logger("ai"),
+            context_provider=lambda files: "--- a.py ---\ncontenido real",
+        )
+        self.assertEqual(factory.create(["a.py"]), "feat: mensaje")
+        self.assertIn("Extracto del contenido", client.prompts[0])
+        self.assertIn("contenido real", client.prompts[0])
 
 
 class ResolveApiKeyTests(TemporaryProjectTestCase):

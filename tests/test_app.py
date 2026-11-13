@@ -266,6 +266,31 @@ class ApplicationTests(TemporaryProjectTestCase):
         self.assertEqual(emails.count("alan@example.com"), 2)
         self.assertEqual(emails.count("carol@example.com"), 1)
 
+    def test_spread_days_backdates_commits(self) -> None:
+        repo = self.init_repo()
+        for name in ("a", "b", "c"):
+            self.write(f"{name}.py", f"print('{name}')\n")
+        remote = self.init_bare_remote()
+        app = self.make_app(Settings(spread_days=10, push_every=0))
+
+        summary = app.run(
+            RunRequest(
+                repo_path=repo,
+                remote_url=str(remote),
+                branch="main",
+                collaborators=(Collaborator("Ada Lovelace", "ada", "ada@example.com", 3),),
+                assume_yes=True,
+                non_interactive=True,
+            )
+        )
+
+        self.assertTrue(summary.ok, summary)
+        self.assertEqual(summary.commits_created, 3)
+        stamps = [int(value) for value in self.git_stdout("log", "--format=%at", "main").split()]
+        self.assertLessEqual(stamps[0], int(time.time()))
+        self.assertGreater(stamps[0] - stamps[-1], 9 * 24 * 3600)
+        self.assertEqual(stamps, sorted(stamps, reverse=True))
+
     def test_cancellation_between_commits_keeps_resumable_state(self) -> None:
         repo = self.init_repo()
         self.write("a.py", "print('a')\n")
@@ -276,8 +301,10 @@ class ApplicationTests(TemporaryProjectTestCase):
         app = self.make_app(Settings(push_every=0), cancelled=event.is_set)
         original_commit = GitRepository.commit
 
-        def commit_and_cancel(repo_self: GitRepository, message: str) -> str:
-            sha = original_commit(repo_self, message)
+        def commit_and_cancel(
+            repo_self: GitRepository, message: str, *, date: object = None
+        ) -> str:
+            sha = original_commit(repo_self, message, date=date)  # type: ignore[arg-type]
             event.set()
             return sha
 

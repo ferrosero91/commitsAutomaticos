@@ -73,6 +73,8 @@ class FormState:
     max_files_per_commit: int = 100
     push_every: int = 1
     delay_seconds: float = 0.0
+    spread_days: float = 0.0
+    interleave: bool = False
     max_file_size_mb: float = 10.0
     resume: bool = False
     keep_going: bool = False
@@ -82,12 +84,15 @@ class FormState:
     ai_base_url: str = DEFAULT_BASE_URL
     ai_api_key: str = ""
     ai_remember_key: bool = True
+    ai_context: bool = False
 
     def to_settings(self, *, dry_run: bool | None = None) -> Settings:
         return Settings(
             max_files_per_commit=self.max_files_per_commit,
             push_every=self.push_every,
             delay_seconds=self.delay_seconds,
+            spread_days=self.spread_days,
+            interleave=self.interleave,
             max_file_size_mb=self.max_file_size_mb,
             resume=self.resume,
             keep_going=self.keep_going,

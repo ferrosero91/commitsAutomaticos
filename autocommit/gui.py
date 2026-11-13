@@ -191,6 +191,8 @@ class AutocommitWindow(tk.Tk):
         self._max_files = tk.StringVar(value="100")
         self._push_every = tk.StringVar(value="1")
         self._delay = tk.StringVar(value="0")
+        self._spread_days = tk.StringVar(value="0")
+        self._interleave = tk.BooleanVar(value=False)
         self._max_mb = tk.StringVar(value="10")
         self._resume = tk.BooleanVar(value=False)
         self._keep_going = tk.BooleanVar(value=False)
@@ -201,6 +203,7 @@ class AutocommitWindow(tk.Tk):
         self._ai_base_url = tk.StringVar(value=DEFAULT_BASE_URL)
         self._ai_key = tk.StringVar()
         self._ai_remember = tk.BooleanVar(value=True)
+        self._ai_context = tk.BooleanVar(value=False)
 
         self._status = tk.StringVar(value="Listo.")
 
@@ -324,6 +327,7 @@ class AutocommitWindow(tk.Tk):
             ("Máx. archivos por commit", self._max_files, 1, 10000),
             ("Commits entre pushes", self._push_every, 0, 10000),
             ("Espera entre pushes (s)", self._delay, 0, 3600),
+            ("Repartir commits en (días)", self._spread_days, 0, 3650),
             ("Tamaño máx. por archivo (MB)", self._max_mb, 1, 1000),
         )
         for row, (label, variable, minimum, maximum) in enumerate(rows):
@@ -340,15 +344,17 @@ class AutocommitWindow(tk.Tk):
             frame,
             text=(
                 "Al cambiar de colaborador se fuerza un push con su token; "
-                "nunca se mezclan autores en un mismo push."
+                "nunca se mezclan autores en un mismo push. «Repartir commits en» "
+                "retrasa las fechas de autor para simular un historial real; no "
+                "espera días reales."
             ),
             foreground=MUTED,
             wraplength=700,
             justify="left",
-        ).grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         checks = ttk.Frame(frame)
-        checks.grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 4))
+        checks.grid(row=6, column=0, columnspan=2, sticky="w", pady=(8, 4))
         ttk.Checkbutton(
             checks, text="Reanudar desde el estado guardado", variable=self._resume
         ).pack(anchor="w")
@@ -356,11 +362,14 @@ class AutocommitWindow(tk.Tk):
             checks, text="Continuar si un commit falla", variable=self._keep_going
         ).pack(anchor="w")
         ttk.Checkbutton(
+            checks, text="Intercalar colaboradores en el historial", variable=self._interleave
+        ).pack(anchor="w")
+        ttk.Checkbutton(
             checks, text="Simulación (no modifica el repositorio)", variable=self._dry_run
         ).pack(anchor="w")
 
         ai = ttk.LabelFrame(frame, text="Mensajes con IA (OpenCode)", padding=12)
-        ai.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        ai.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         ai.columnconfigure(1, weight=1)
 
         ttk.Checkbutton(
@@ -487,6 +496,8 @@ class AutocommitWindow(tk.Tk):
             max_files_per_commit=self._parse_int(self._max_files.get(), 0),
             push_every=self._parse_int(self._push_every.get(), -1),
             delay_seconds=self._parse_float(self._delay.get(), -1.0),
+            spread_days=self._parse_float(self._spread_days.get(), -1.0),
+            interleave=self._interleave.get(),
             max_file_size_mb=self._parse_float(self._max_mb.get(), 0.0),
             resume=self._resume.get(),
             keep_going=self._keep_going.get(),
@@ -496,6 +507,7 @@ class AutocommitWindow(tk.Tk):
             ai_base_url=self._ai_base_url.get().strip(),
             ai_api_key=self._ai_key.get().strip(),
             ai_remember_key=self._ai_remember.get(),
+            ai_context=self._ai_context.get(),
         )
 
     @staticmethod

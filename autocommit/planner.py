@@ -67,24 +67,36 @@ class CommitPlanner:
         sizes = self._distribute(len(paths), total_commits)
         planned: list[PlannedCommit] = []
         cursor = 0
-        index = 0
 
-        for collaborator in collaborators:
-            for _ in range(collaborator.commits):
-                size = sizes[index]
-                chunk = tuple(paths[cursor : cursor + size])
-                cursor += size
-                planned.append(
-                    PlannedCommit(
-                        index=index,
-                        collaborator=collaborator,
-                        files=chunk,
-                        message=self._messages.create(chunk),
-                    )
+        for index, collaborator in enumerate(self._author_order(collaborators)):
+            size = sizes[index]
+            chunk = tuple(paths[cursor : cursor + size])
+            cursor += size
+            planned.append(
+                PlannedCommit(
+                    index=index,
+                    collaborator=collaborator,
+                    files=chunk,
+                    message=self._messages.create(chunk),
                 )
-                index += 1
+            )
 
         return CommitPlan(branch=branch, commits=tuple(planned), total_files=len(paths))
+
+    def _author_order(self, collaborators: Sequence[Collaborator]) -> list[Collaborator]:
+        if not self._settings.interleave:
+            return [
+                collaborator for collaborator in collaborators for _ in range(collaborator.commits)
+            ]
+
+        remaining = [[collaborator, collaborator.commits] for collaborator in collaborators]
+        order: list[Collaborator] = []
+        while any(count for _, count in remaining):
+            for entry in remaining:
+                if entry[1] > 0:
+                    order.append(entry[0])
+                    entry[1] -= 1
+        return order
 
     @staticmethod
     def _distribute(total_files: int, total_commits: int) -> list[int]:

@@ -90,6 +90,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Espera entre pushes.",
     )
     parser.add_argument(
+        "--spread-days",
+        type=float,
+        default=0.0,
+        metavar="DÍAS",
+        help=(
+            "Reparte las fechas de los commits en ese rango hacia atrás "
+            "(0 = todos con la fecha actual)."
+        ),
+    )
+    parser.add_argument(
+        "--interleave",
+        action="store_true",
+        help="Alterna los colaboradores en el historial en lugar de agruparlos.",
+    )
+    parser.add_argument(
         "--max-file-size-mb",
         type=float,
         default=10.0,
@@ -156,6 +171,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=200,
         metavar="N",
         help="Máximo de mensajes generados por IA; después se usa la heurística.",
+    )
+    parser.add_argument(
+        "--ai-context",
+        choices=("none", "snippets"),
+        default="none",
+        help=(
+            "Enviar a la IA un extracto acotado del contenido para mensajes más "
+            "concretos (requiere --repo)."
+        ),
     )
 
     parser.add_argument(
@@ -279,6 +303,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_files_per_commit=args.max_files_per_commit,
             push_every=args.push_every,
             delay_seconds=args.delay,
+            spread_days=args.spread_days,
+            interleave=args.interleave,
             max_file_size_mb=args.max_file_size_mb,
             allow_secrets=args.allow_secrets,
             dry_run=args.dry_run,

@@ -43,6 +43,18 @@ class DistributionTests(unittest.TestCase):
         )
         self.assertEqual([commit.index for commit in plan.commits], [0, 1, 2, 3])
 
+    def test_interleaves_collaborators_when_enabled(self) -> None:
+        files = [f"file_{index}.py" for index in range(4)]
+        ada = Collaborator("Ada", "ada", "ada@example.com", 2)
+        alan = Collaborator("Alan", "alan", "alan@example.com", 2)
+        planner = CommitPlanner(Settings(interleave=True), factory())
+        plan = planner.build(files, [ada, alan], "main")
+        self.assertEqual(
+            [commit.collaborator.username for commit in plan.commits],
+            ["ada", "alan", "ada", "alan"],
+        )
+        self.assertEqual(plan.files, tuple(files))
+
     def test_respects_max_files_per_commit(self) -> None:
         files = [f"file_{index}.py" for index in range(250)]
         collaborator = Collaborator("Ada", "ada", "ada@example.com", 3)
@@ -94,6 +106,10 @@ class ValidationTests(unittest.TestCase):
                 Settings(max_files_per_commit=100),
             )
         self.assertIn("al menos 3 commits", str(context.exception))
+
+    def test_rejects_negative_spread_days(self) -> None:
+        with self.assertRaises(ValidationError):
+            Settings(spread_days=-1)
 
     def test_requires_branch(self) -> None:
         planner = CommitPlanner(Settings(), factory())

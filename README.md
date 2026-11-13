@@ -74,8 +74,9 @@ La ventana tiene cuatro pestañas:
 - **Colaboradores:** tabla con nombre, usuario, email, commits y estado del
   token. Añadir/editar/quitar con un diálogo; el token se escribe enmascarado y
   se puede guardar en el almacén seguro (`0600`).
-- **Opciones:** límites de archivos, pushes, espera, reanudar, continuar ante
-  errores, simulación y mensajes con IA (modelo, URL y clave).
+- **Opciones:** límites de archivos, pushes, espera, reparto de fechas,
+  intercalado de autores, reanudar, continuar ante errores, simulación y
+  mensajes con IA (modelo, URL, clave y extracto de archivos).
 - **Registro:** salida en vivo, progreso y resultado.
 
 Botones **Previsualizar** (simulación, no toca el repositorio), **Ejecutar** y
@@ -155,7 +156,9 @@ Ejemplo: `Ada Lovelace:ada-lovelace:ada@example.com:12`.
 | `--collaborator SPEC` | Colaborador; se puede repetir. | Pregunta |
 | `--max-files-per-commit N` | Máximo de archivos por commit. | `100` |
 | `--push-every N` | Commits entre pushes dentro de un mismo autor; al cambiar de colaborador siempre se hace push. `0` = al final de cada bloque. | `1` |
-| `--delay SEGUNDOS` | Espera entre pushes. | `0` |
+| `--delay SEGUNDOS` | Espera real entre pushes. | `0` |
+| `--spread-days DÍAS` | Reparte las fechas de commit en ese rango hacia atrás. | `0` |
+| `--interleave` | Alterna colaboradores en el historial. | Desactivado |
 | `--max-file-size-mb MB` | Tamaño máximo por archivo. | `10` |
 | `--allow-secrets` | No bloquear posibles secretos (no recomendado). | Desactivado |
 | `--ai` | Generar mensajes con OpenCode; si falla, usa la heurística. | Desactivado |
@@ -166,6 +169,7 @@ Ejemplo: `Ada Lovelace:ada-lovelace:ada@example.com:12`.
 | `--ai-api-key-file RUTA` | Archivo con la clave. | `~/.config/autocommit/opencode_key` |
 | `--ai-timeout SEGUNDOS` | Timeout por llamada. | `30` |
 | `--ai-max-calls N` | Mensajes por IA; después, heurística. | `200` |
+| `--ai-context {none,snippets}` | Enviar extracto de archivos a la IA. | `none` |
 | `--env-file RUTA` | Carga variables `CLAVE=VALOR` antes de ejecutar. | — |
 | `--gui` | Abre la interfaz gráfica en lugar de la consola. | Desactivado |
 | `--dry-run` | Mostrar el plan sin modificar el repositorio. | Desactivado |
@@ -271,6 +275,34 @@ la plantilla:
 > historial con `git filter-repo` (o BFG) antes de volver a publicar.
 
 ---
+
+## Simular un flujo real
+
+Por defecto los commits se crean ahora y se agrupan por colaborador. Para que el
+historial parezca natural:
+
+```bash
+python3 -m autocommit \
+  --repo ~/mi-app \
+  --remote-url https://github.com/mi-org/mi-app.git \
+  --branch main \
+  --collaborator "Ada Lovelace:ada-lovelace:ada@example.com:10" \
+  --collaborator "Alan Turing:alan-turing:alan@example.com:8" \
+  --spread-days 30 \
+  --interleave \
+  --ai --ai-context snippets \
+  --yes
+```
+
+- **`--spread-days 30`**: las fechas de autor y commit se reparten en los
+  últimos 30 días. GitHub muestra la fecha de autor, así que no hace falta
+  esperar días reales.
+- **`--interleave`**: alterna los autores (Ada, Alan, Ada, Alan…) en lugar de
+  dejar todos los commits de una persona seguidos.
+- **`--delay 60`** y **`--push-every 1`**: esperan segundos reales entre pushes.
+  Es opcional; para el historial lo importante son las fechas.
+- **`--ai --ai-context snippets`**: la IA recibe un extracto acotado para
+  escribir mensajes más concretos.
 
 ## Cómo se construye el plan
 
@@ -405,6 +437,10 @@ Notas de la API V2:
 - Si la red, la clave o el formato de la respuesta fallan, se usa el generador
   heurístico y el proceso continúa.
 - `--ai-max-calls` limita el gasto; al alcanzarlo se vuelve a la heurística.
+- `--ai-context snippets` envía hasta ~6 KB por commit de extractos de archivos
+  (sin binarios y con credenciales redactadas) para que el mensaje describa el
+  contenido y no solo la ruta. Es opcional y requiere `--repo` en la CLI; en la
+  GUI se activa con una casilla y usa la carpeta seleccionada.
 - Una respuesta se acepta solo si cumple Conventional Commits y cabe en 72
   caracteres; el resto se descarta.
 - Con `--dry-run --ai` también se generan mensajes (y se consume cuota).
@@ -538,8 +574,10 @@ python3 -m autocommit --delay 30 --push-every 1
 - Los mensajes son heurísticos y no interpretan el contenido del diff.
 - El escaneo de secretos es heurístico y solo lee los primeros 512 KB de cada
   archivo.
-- Los mensajes con IA dependen de un servicio externo; el respaldo heurístico
-  no interpreta el contenido del diff.
+- Los mensajes con IA dependen de un servicio externo; sin IA, el respaldo
+  heurístico describe el grupo de archivos y no interpreta el contenido.
+- `--ai-context snippets` envía extractos de código al proveedor de IA; es
+  opcional y conviene revisar la política de privacidad del proveedor.
 - No firma commits con GPG.
 - Se omiten submódulos y repositorios anidados.
 

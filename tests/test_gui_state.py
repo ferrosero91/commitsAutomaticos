@@ -175,6 +175,11 @@ class GuiStateTests(TemporaryProjectTestCase):
         self.assertTrue(settings.resume)
         self.assertTrue(settings.dry_run)
 
+    def test_to_settings_includes_spread_and_interleave(self) -> None:
+        settings = self.make_state(spread_days=15.5, interleave=True).to_settings()
+        self.assertEqual(settings.spread_days, 15.5)
+        self.assertTrue(settings.interleave)
+
     def test_to_settings_validates(self) -> None:
         with self.assertRaises(ValidationError):
             self.make_state(max_files_per_commit=0).to_settings()
@@ -276,6 +281,13 @@ class GuiStateTests(TemporaryProjectTestCase):
             factory = prepare_message_factory(
                 state, state.to_settings(), null_logger("gui"), persist=False
             )
+        self.assertIsNotNone(factory)
+
+    def test_ai_factory_with_context_flag(self) -> None:
+        state = self.make_state(ai_enabled=True, ai_api_key="oc_sk_contexto", ai_context=True)
+        factory = prepare_message_factory(
+            state, state.to_settings(), null_logger("gui"), persist=False
+        )
         self.assertIsNotNone(factory)
 
     def test_ai_factory_reads_saved_key(self) -> None:

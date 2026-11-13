@@ -35,6 +35,7 @@ from .messages import (
     CommitMessageFactory,
     ConventionalCommitMessageFactory,
 )
+from .security import redact
 from .ui import Prompter
 
 DEFAULT_BASE_URL = "https://opencode.ai/inference/go/openai/v1"
@@ -47,6 +48,9 @@ DEFAULT_MAX_CALLS = 200
 MAX_RETRIES = 2
 RETRY_DELAY = 1.0
 MAX_PROMPT_FILES = 80
+MAX_SNIPPET_CHARS_PER_FILE = 1200
+MAX_SNIPPET_TOTAL_CHARS = 6000
+MAX_SNIPPET_LINES = 60
 
 CONVENTIONAL_RE = re.compile(
     r"^(?P<type>feat|fix|docs|test|style|chore|refactor|perf|build|ci)"
@@ -61,6 +65,7 @@ Reglas:
 - Tipos permitidos: feat, fix, docs, test, style, chore, refactor, perf, build, ci.
 - La descripción va en español, en imperativo y con máximo 60 caracteres.
 - Describe el grupo de archivos; no inventes cambios que las rutas no sugieran.
+- Si se incluye un extracto del contenido, básate en él para concretar el mensaje.
 """
 
 
@@ -170,12 +175,64 @@ class ChatClient(Protocol):
         """Devuelve el texto generado por el modelo."""
 
 
-def build_user_prompt(files: Sequence[str], limit: int = MAX_PROMPT_FILES) -> str:
+def build_user_prompt(
+    files: Sequence[str],
+    context: str = "",
+    limit: int = MAX_PROMPT_FILES,
+) -> str:
     lines = [f"- {path}" for path in files[:limit]]
     remaining = len(files) - limit
     if remaining > 0:
         lines.append(f"- ... y {remaining} archivo(s) más")
-    return "Archivos incluidos en el commit:\n" + "\n".join(lines)
+    prompt = "Archivos incluidos en el commit:\n" + "\n".join(lines)
+    if context.strip():
+        prompt += (
+            "\n\nExtracto del contenido (para inferir el cambio; no repitas el código):\n" + context
+        )
+    return prompt
+
+
+class FileSnippetProvider:
+    """Extracto acotado y redactado de los archivos para la IA.
+
+    Solo se usa cuando el usuario lo activa. No envía binarios, limita el
+    tamaño total y elimina credenciales conocidas antes de salir.
+    """
+
+    def __init__(
+        self,
+        root: Path,
+        *,
+        max_chars_per_file: int = MAX_SNIPPET_CHARS_PER_FILE,
+        max_total_chars: int = MAX_SNIPPET_TOTAL_CHARS,
+        max_lines: int = MAX_SNIPPET_LINES,
+    ) -> None:
+        self._root = Path(root)
+        self._max_chars_per_file = max_chars_per_file
+        self._max_total_chars = max_total_chars
+        self._max_lines = max_lines
+
+    def build(self, files: Sequence[str]) -> str:
+        blocks: list[str] = []
+        used = 0
+        for relative in files:
+            path = self._root / relative
+            try:
+                raw = path.read_bytes()[: self._max_chars_per_file * 2]
+            except OSError:
+                continue
+            if b"\x00" in raw[:1024]:
+                continue
+            text = redact(raw.decode("utf-8", errors="ignore"))
+            snippet = "\n".join(text.splitlines()[: self._max_lines])
+            if len(snippet) > self._max_chars_per_file:
+                snippet = snippet[: self._max_chars_per_file].rstrip() + "\n..."
+            block = f"--- {relative} ---\n{snippet}"
+            if used + len(block) > self._max_total_chars:
+                break
+            blocks.append(block)
+            used += len(block)
+        return "\n\n".join(blocks)
 
 
 def _clean_line(value: str) -> str:
@@ -323,9 +380,11 @@ class AIMessageFactory:
         *,
         max_calls: int = DEFAULT_MAX_CALLS,
         logger: logging.Logger | None = None,
+        context_provider: Callable[[Sequence[str]], str] | None = None,
     ) -> None:
         self._client = client
         self._fallback = fallback or ConventionalCommitMessageFactory(random.Random())
+        self._context_provider = context_provider
         self._max_calls = max_calls
         self._logger = logger or logging.getLogger("autocommit.ai")
         self._calls = 0
@@ -356,7 +415,13 @@ class AIMessageFactory:
 
         self._calls += 1
         try:
-            raw = self._client.complete(SYSTEM_PROMPT, build_user_prompt(files))
+            context = ""
+            if self._context_provider is not None:
+                try:
+                    context = self._context_provider(files)
+                except Exception:
+                    context = ""
+            raw = self._client.complete(SYSTEM_PROMPT, build_user_prompt(files, context))
             message = sanitize_message(raw)
             if message is None:
                 raise AIError("La respuesta no sigue el formato Conventional Commits.")

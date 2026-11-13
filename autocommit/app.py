@@ -13,6 +13,7 @@ import time
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from .credentials import TokenProvider
@@ -397,6 +398,8 @@ class Application:
             plan.collaborator_count,
         )
         self.logger.info("  Rama: %s | push: %s", plan.branch, push_label)
+        if self.settings.spread_days > 0:
+            self.logger.info("  Fechas: repartidas en %.1f día(s).", self.settings.spread_days)
         if plan.collaborator_count > 1:
             self.logger.info("  Cada push se autentica con el token del autor de su bloque.")
         for collaborator, count in Counter(commit.collaborator for commit in plan.commits).items():
@@ -518,7 +521,10 @@ class Application:
                         state_store.save(plan, completed, last_pushed)
                         continue
 
-                    sha = repo.commit(commit.message)
+                    sha = repo.commit(
+                        commit.message,
+                        date=self._commit_date(plan, commit),
+                    )
                 except GitError as exc:
                     summary.failures += 1
                     self.logger.error(
@@ -566,6 +572,23 @@ class Application:
             return last_pushed
         finally:
             repo.restore_identity(previous_identity)
+
+    def _commit_date(self, plan: CommitPlan, commit: object) -> datetime | None:
+        """Reparte las fechas de commit en ``spread_days`` hacia atrás.
+
+        Así el historial parece distribuido en el tiempo aunque los pushes se
+        hagan ahora. Sin reparto se usa la fecha actual (None).
+        """
+        if self.settings.spread_days <= 0 or plan.total_commits <= 1:
+            return None
+        from .models import PlannedCommit
+
+        assert isinstance(commit, PlannedCommit)
+        now = datetime.now().astimezone().replace(microsecond=0)
+        end = now - timedelta(minutes=1)
+        start = end - timedelta(days=self.settings.spread_days)
+        fraction = commit.index / (plan.total_commits - 1)
+        return start + (end - start) * fraction
 
     def _delay(self, seconds: float) -> None:
         """Espera interrumpible: reacciona a «Detener» en menos de 0,2 s."""
